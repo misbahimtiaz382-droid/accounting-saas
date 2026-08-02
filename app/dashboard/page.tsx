@@ -171,6 +171,7 @@ export default function DashboardPage() {
     { label: "Expenses", path: "/expenses" },
     { label: "Payments", path: "/payment" },
     { label: "Reports", path: "/report" },
+    { label: "Team", path: "/team" },
     { label: "Settings", path: "/settings" },
   ];
 
