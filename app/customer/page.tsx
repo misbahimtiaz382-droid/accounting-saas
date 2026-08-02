@@ -17,12 +17,19 @@ export default function CustomersPage() {
 
   const [companyId, setCompanyId] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
+
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(
+    null
+  );
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadPage();
@@ -73,10 +80,33 @@ export default function CustomersPage() {
       return;
     }
 
-    setCustomers(data ?? []);
+    setCustomers((data as Customer[]) ?? []);
   }
 
-  async function handleAddCustomer(event: FormEvent<HTMLFormElement>) {
+  function resetForm() {
+    setEditingCustomerId(null);
+    setName("");
+    setEmail("");
+    setPhone("");
+    setAddress("");
+  }
+
+  function handleEditCustomer(customer: Customer) {
+    setEditingCustomerId(customer.id);
+    setName(customer.name);
+    setEmail(customer.email || "");
+    setPhone(customer.phone || "");
+    setAddress(customer.address || "");
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  async function handleSaveCustomer(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
 
     if (!name.trim()) {
@@ -90,6 +120,31 @@ export default function CustomersPage() {
     }
 
     setSaving(true);
+
+    if (editingCustomerId) {
+      const { error } = await supabase
+        .from("customers")
+        .update({
+          name: name.trim(),
+          email: email.trim() || null,
+          phone: phone.trim() || null,
+          address: address.trim() || null,
+        })
+        .eq("id", editingCustomerId)
+        .eq("company_id", companyId);
+
+      setSaving(false);
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      resetForm();
+      await loadCustomers(companyId);
+      alert("Customer successfully update ho gaya.");
+      return;
+    }
 
     const { error } = await supabase.from("customers").insert({
       company_id: companyId,
@@ -106,106 +161,99 @@ export default function CustomersPage() {
       return;
     }
 
-    setName("");
-    setEmail("");
-    setPhone("");
-    setAddress("");
+    resetForm();
+    await loadCustomers(companyId);
+    alert("Customer successfully add ho gaya.");
+  }
+
+  async function handleDeleteCustomer(customer: Customer) {
+  const confirmed = window.confirm(
+    '"' + customer.name + '" ko delete karna hai?'
+  );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(customer.id);
+
+    const { error } = await supabase
+      .from("customers")
+      .delete()
+      .eq("id", customer.id)
+      .eq("company_id", companyId);
+
+    setDeletingId(null);
+
+    if (error) {
+      const errorMessage = error.message.toLowerCase();
+
+      if (
+        errorMessage.includes("foreign key") ||
+        errorMessage.includes("violates")
+      ) {
+        alert(
+          "Ye customer sale ya payment ke saath linked hai, isliye delete nahi ho sakta."
+        );
+        return;
+      }
+
+      alert(error.message);
+      return;
+    }
+
+    if (editingCustomerId === customer.id) {
+      resetForm();
+    }
 
     await loadCustomers(companyId);
+    alert("Customer delete ho gaya.");
   }
 
   if (loading) {
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "Arial",
-        }}
-      >
-        Loading...
-      </main>
-    );
+    return <main style={loadingStyle}>Loading...</main>;
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        backgroundColor: "#f4f7fb",
-        padding: "32px",
-        fontFamily: "Arial, Helvetica, sans-serif",
-        color: "#172033",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: "1100px",
-          margin: "0 auto",
-        }}
-      >
+    <main style={pageStyle}>
+      <div style={{ maxWidth: "1150px", margin: "0 auto" }}>
         <button
           type="button"
           onClick={() => router.push("/dashboard")}
-          style={{
-            border: "none",
-            backgroundColor: "transparent",
-            color: "#2563eb",
-            cursor: "pointer",
-            marginBottom: "20px",
-            fontSize: "15px",
-          }}
+          style={backButtonStyle}
         >
           ← Back to Dashboard
         </button>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "24px",
-          }}
-        >
+        <div style={headingRowStyle}>
           <div>
-            <h1 style={{ margin: 0, fontSize: "30px" }}>Customers</h1>
+            <h1 style={{ margin: 0, fontSize: "30px" }}>
+              Customers
+            </h1>
+
             <p style={{ color: "#667085" }}>
-              Customer records add aur manage karo.
+              Customer records add, edit aur manage karo.
             </p>
           </div>
 
-          <div
-            style={{
-              backgroundColor: "#ffffff",
-              padding: "12px 18px",
-              borderRadius: "10px",
-              border: "1px solid #eaecf0",
-            }}
-          >
+          <div style={counterStyle}>
             Total Customers: <strong>{customers.length}</strong>
           </div>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "360px 1fr",
-            gap: "24px",
-          }}
-        >
-          <form
-            onSubmit={handleAddCustomer}
-            style={{
-              backgroundColor: "#ffffff",
-              padding: "24px",
-              borderRadius: "14px",
-              border: "1px solid #eaecf0",
-              boxShadow: "0 5px 18px rgba(16,24,40,0.06)",
-            }}
-          >
-            <h2 style={{ marginTop: 0 }}>Add Customer</h2>
+        <div style={gridStyle}>
+          <form onSubmit={handleSaveCustomer} style={cardStyle}>
+            <h2 style={{ marginTop: 0 }}>
+              {editingCustomerId
+                ? "Edit Customer"
+                : "Add Customer"}
+            </h2>
+
+            {editingCustomerId && (
+              <div style={editNoticeStyle}>
+                Customer edit mode active hai.
+              </div>
+            )}
 
             <input
               value={name}
@@ -244,70 +292,108 @@ export default function CustomersPage() {
               type="submit"
               disabled={saving}
               style={{
-                width: "100%",
-                padding: "13px",
-                border: "none",
-                borderRadius: "8px",
-                backgroundColor: saving ? "#93c5fd" : "#2563eb",
-                color: "#ffffff",
-                cursor: saving ? "not-allowed" : "pointer",
-                fontSize: "16px",
+                ...primaryButtonStyle,
+                backgroundColor: saving
+                  ? "#93c5fd"
+                  : "#2563eb",
+                cursor: saving
+                  ? "not-allowed"
+                  : "pointer",
               }}
             >
-              {saving ? "Saving..." : "Add Customer"}
+              {saving
+                ? "Saving..."
+                : editingCustomerId
+                ? "Update Customer"
+                : "Add Customer"}
             </button>
+
+            {editingCustomerId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                disabled={saving}
+                style={cancelButtonStyle}
+              >
+                Cancel Edit
+              </button>
+            )}
           </form>
 
-          <section
-            style={{
-              backgroundColor: "#ffffff",
-              padding: "24px",
-              borderRadius: "14px",
-              border: "1px solid #eaecf0",
-              boxShadow: "0 5px 18px rgba(16,24,40,0.06)",
-            }}
-          >
+          <section style={cardStyle}>
             <h2 style={{ marginTop: 0 }}>Customer List</h2>
 
             {customers.length === 0 ? (
-              <p
-                style={{
-                  color: "#98a2b3",
-                  textAlign: "center",
-                  padding: "40px 0",
-                }}
-              >
+              <p style={emptyStyle}>
                 Abhi koi customer add nahi hua.
               </p>
             ) : (
               <div style={{ overflowX: "auto" }}>
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                  }}
-                >
+                <table style={tableStyle}>
                   <thead>
                     <tr>
                       <th style={tableHeaderStyle}>Name</th>
                       <th style={tableHeaderStyle}>Email</th>
                       <th style={tableHeaderStyle}>Phone</th>
                       <th style={tableHeaderStyle}>Address</th>
+                      <th style={tableHeaderStyle}>Actions</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     {customers.map((customer) => (
                       <tr key={customer.id}>
-                        <td style={tableCellStyle}>{customer.name}</td>
+                        <td style={tableCellStyle}>
+                          {customer.name}
+                        </td>
+
                         <td style={tableCellStyle}>
                           {customer.email || "-"}
                         </td>
+
                         <td style={tableCellStyle}>
                           {customer.phone || "-"}
                         </td>
+
                         <td style={tableCellStyle}>
                           {customer.address || "-"}
+                        </td>
+
+                        <td style={tableCellStyle}>
+                          <div style={actionButtonsStyle}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleEditCustomer(customer)
+                              }
+                              style={editButtonStyle}
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteCustomer(customer)
+                              }
+                              disabled={deletingId === customer.id}
+                              style={{
+                                ...deleteButtonStyle,
+                                cursor:
+                                  deletingId === customer.id
+                                    ? "not-allowed"
+                                    : "pointer",
+                                opacity:
+                                  deletingId === customer.id
+                                    ? 0.6
+                                    : 1,
+                              }}
+                            >
+                              {deletingId === customer.id
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -322,6 +408,69 @@ export default function CustomersPage() {
   );
 }
 
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  backgroundColor: "#f4f7fb",
+  padding: "32px",
+  fontFamily: "Arial, Helvetica, sans-serif",
+  color: "#172033",
+};
+
+const loadingStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontFamily: "Arial",
+};
+
+const backButtonStyle: React.CSSProperties = {
+  border: "none",
+  backgroundColor: "transparent",
+  color: "#2563eb",
+  cursor: "pointer",
+  marginBottom: "20px",
+  fontSize: "15px",
+};
+
+const headingRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginBottom: "24px",
+};
+
+const counterStyle: React.CSSProperties = {
+  backgroundColor: "#ffffff",
+  padding: "12px 18px",
+  borderRadius: "10px",
+  border: "1px solid #eaecf0",
+};
+
+const gridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "360px minmax(0, 1fr)",
+  gap: "24px",
+};
+
+const cardStyle: React.CSSProperties = {
+  backgroundColor: "#ffffff",
+  padding: "24px",
+  borderRadius: "14px",
+  border: "1px solid #eaecf0",
+  boxShadow: "0 5px 18px rgba(16,24,40,0.06)",
+};
+
+const editNoticeStyle: React.CSSProperties = {
+  backgroundColor: "#eff6ff",
+  border: "1px solid #bfdbfe",
+  color: "#1d4ed8",
+  padding: "10px 12px",
+  borderRadius: "8px",
+  marginBottom: "14px",
+  fontSize: "14px",
+};
+
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px",
@@ -330,6 +479,39 @@ const inputStyle: React.CSSProperties = {
   borderRadius: "8px",
   boxSizing: "border-box",
   fontSize: "15px",
+  backgroundColor: "#ffffff",
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "13px",
+  border: "none",
+  borderRadius: "8px",
+  color: "#ffffff",
+  fontSize: "16px",
+};
+
+const cancelButtonStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "12px",
+  border: "1px solid #d0d5dd",
+  borderRadius: "8px",
+  backgroundColor: "#ffffff",
+  color: "#344054",
+  cursor: "pointer",
+  fontSize: "15px",
+  marginTop: "10px",
+};
+
+const emptyStyle: React.CSSProperties = {
+  color: "#98a2b3",
+  textAlign: "center",
+  padding: "40px 0",
+};
+
+const tableStyle: React.CSSProperties = {
+  width: "100%",
+  borderCollapse: "collapse",
 };
 
 const tableHeaderStyle: React.CSSProperties = {
@@ -338,10 +520,37 @@ const tableHeaderStyle: React.CSSProperties = {
   borderBottom: "1px solid #eaecf0",
   color: "#667085",
   fontSize: "14px",
+  whiteSpace: "nowrap",
 };
 
 const tableCellStyle: React.CSSProperties = {
   padding: "14px 12px",
   borderBottom: "1px solid #f2f4f7",
   fontSize: "14px",
+  verticalAlign: "top",
+};
+
+const actionButtonsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "8px",
+  alignItems: "center",
+};
+
+const editButtonStyle: React.CSSProperties = {
+  border: "1px solid #93c5fd",
+  borderRadius: "7px",
+  padding: "7px 11px",
+  backgroundColor: "#eff6ff",
+  color: "#1d4ed8",
+  cursor: "pointer",
+  fontSize: "13px",
+};
+
+const deleteButtonStyle: React.CSSProperties = {
+  border: "1px solid #fda29b",
+  borderRadius: "7px",
+  padding: "7px 11px",
+  backgroundColor: "#fff5f5",
+  color: "#b42318",
+  fontSize: "13px",
 };
