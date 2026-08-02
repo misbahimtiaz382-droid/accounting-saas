@@ -139,7 +139,9 @@ export default function SalesPage() {
     setSales((data as unknown as Sale[]) ?? []);
   }
 
-  async function handleCreateSale(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateSale(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
 
     if (!customerId) {
@@ -162,10 +164,14 @@ export default function SalesPage() {
       return;
     }
 
-    const availableStock = Number(selectedProduct.stock_quantity || 0);
+    const availableStock = Number(
+      selectedProduct.stock_quantity || 0
+    );
 
     if (saleQuantity > availableStock) {
-alert("Stock sirf " + availableStock + " available hai.");
+      alert(
+        "Stock sirf " + availableStock + " available hai."
+      );
       return;
     }
 
@@ -187,13 +193,15 @@ alert("Stock sirf " + availableStock + " available hai.");
       return;
     }
 
-    const { error: itemError } = await supabase.from("sale_items").insert({
-      sale_id: sale.id,
-      product_id: productId,
-      quantity: saleQuantity,
-      unit_price: unitPrice,
-      total_price: totalAmount,
-    });
+    const { error: itemError } = await supabase
+      .from("sale_items")
+      .insert({
+        sale_id: sale.id,
+        product_id: productId,
+        quantity: saleQuantity,
+        unit_price: unitPrice,
+        total_price: totalAmount,
+      });
 
     if (itemError) {
       setSaving(false);
@@ -245,7 +253,9 @@ alert("Stock sirf " + availableStock + " available hai.");
 
         <div style={headingRowStyle}>
           <div>
-            <h1 style={{ margin: 0, fontSize: "30px" }}>Sales</h1>
+            <h1 style={{ margin: 0, fontSize: "30px" }}>
+              Sales
+            </h1>
 
             <p style={{ color: "#667085" }}>
               Customer sale aur stock manage karo.
@@ -263,7 +273,9 @@ alert("Stock sirf " + availableStock + " available hai.");
 
             <select
               value={customerId}
-              onChange={(event) => setCustomerId(event.target.value)}
+              onChange={(event) =>
+                setCustomerId(event.target.value)
+              }
               style={inputStyle}
             >
               <option value="">Select customer</option>
@@ -277,14 +289,17 @@ alert("Stock sirf " + availableStock + " available hai.");
 
             <select
               value={productId}
-              onChange={(event) => setProductId(event.target.value)}
+              onChange={(event) =>
+                setProductId(event.target.value)
+              }
               style={inputStyle}
             >
               <option value="">Select product</option>
 
               {products.map((product) => (
                 <option key={product.id} value={product.id}>
-                  {product.name} — Stock: {product.stock_quantity || 0}
+                  {product.name} — Stock:{" "}
+                  {product.stock_quantity || 0}
                 </option>
               ))}
             </select>
@@ -293,7 +308,9 @@ alert("Stock sirf " + availableStock + " available hai.");
               type="number"
               min="1"
               value={quantity}
-              onChange={(event) => setQuantity(event.target.value)}
+              onChange={(event) =>
+                setQuantity(event.target.value)
+              }
               placeholder="Quantity"
               style={inputStyle}
             />
@@ -302,7 +319,12 @@ alert("Stock sirf " + availableStock + " available hai.");
               <div>
                 Unit Price
 
-                <strong style={{ display: "block", marginTop: "5px" }}>
+                <strong
+                  style={{
+                    display: "block",
+                    marginTop: "5px",
+                  }}
+                >
                   Rs. {unitPrice.toFixed(2)}
                 </strong>
               </div>
@@ -310,7 +332,12 @@ alert("Stock sirf " + availableStock + " available hai.");
               <div>
                 Total
 
-                <strong style={{ display: "block", marginTop: "5px" }}>
+                <strong
+                  style={{
+                    display: "block",
+                    marginTop: "5px",
+                  }}
+                >
                   Rs. {totalAmount.toFixed(2)}
                 </strong>
               </div>
@@ -321,8 +348,12 @@ alert("Stock sirf " + availableStock + " available hai.");
               disabled={saving}
               style={{
                 ...saveButtonStyle,
-                backgroundColor: saving ? "#93c5fd" : "#2563eb",
-                cursor: saving ? "not-allowed" : "pointer",
+                backgroundColor: saving
+                  ? "#93c5fd"
+                  : "#2563eb",
+                cursor: saving
+                  ? "not-allowed"
+                  : "pointer",
               }}
             >
               {saving ? "Saving..." : "Create Sale"}
@@ -341,9 +372,21 @@ alert("Stock sirf " + availableStock + " available hai.");
                 <table style={tableStyle}>
                   <thead>
                     <tr>
-                      <th style={tableHeaderStyle}>Customer</th>
-                      <th style={tableHeaderStyle}>Amount</th>
-                      <th style={tableHeaderStyle}>Date</th>
+                      <th style={tableHeaderStyle}>
+                        Customer
+                      </th>
+
+                      <th style={tableHeaderStyle}>
+                        Amount
+                      </th>
+
+                      <th style={tableHeaderStyle}>
+                        Date
+                      </th>
+
+                      <th style={tableHeaderStyle}>
+                        Invoice
+                      </th>
                     </tr>
                   </thead>
 
@@ -355,11 +398,30 @@ alert("Stock sirf " + availableStock + " available hai.");
                         </td>
 
                         <td style={tableCellStyle}>
-                          Rs. {Number(sale.total_amount || 0).toFixed(2)}
+                          Rs.{" "}
+                          {Number(
+                            sale.total_amount || 0
+                          ).toFixed(2)}
                         </td>
 
                         <td style={tableCellStyle}>
-                          {new Date(sale.created_at).toLocaleDateString()}
+                          {new Date(
+                            sale.created_at
+                          ).toLocaleDateString()}
+                        </td>
+
+                        <td style={tableCellStyle}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              router.push(
+                                "/invoices/" + sale.id
+                              )
+                            }
+                            style={invoiceButtonStyle}
+                          >
+                            View Invoice
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -481,4 +543,14 @@ const tableCellStyle: React.CSSProperties = {
   padding: "14px 12px",
   borderBottom: "1px solid #f2f4f7",
   fontSize: "14px",
+};
+
+const invoiceButtonStyle: React.CSSProperties = {
+  border: "none",
+  borderRadius: "7px",
+  padding: "8px 12px",
+  backgroundColor: "#2563eb",
+  color: "#ffffff",
+  cursor: "pointer",
+  fontSize: "13px",
 };
