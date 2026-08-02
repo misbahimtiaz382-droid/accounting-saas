@@ -17,6 +17,9 @@ export default function SuppliersPage() {
 
   const [companyId, setCompanyId] = useState("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(
+    null
+  );
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -25,6 +28,7 @@ export default function SuppliersPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadPage();
@@ -75,10 +79,31 @@ export default function SuppliersPage() {
       return;
     }
 
-    setSuppliers(data ?? []);
+    setSuppliers((data as Supplier[]) ?? []);
   }
 
-  async function handleAddSupplier(
+  function resetForm() {
+    setEditingSupplierId(null);
+    setName("");
+    setEmail("");
+    setPhone("");
+    setAddress("");
+  }
+
+  function handleEditSupplier(supplier: Supplier) {
+    setEditingSupplierId(supplier.id);
+    setName(supplier.name);
+    setEmail(supplier.email || "");
+    setPhone(supplier.phone || "");
+    setAddress(supplier.address || "");
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  async function handleSaveSupplier(
     event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
@@ -95,6 +120,31 @@ export default function SuppliersPage() {
 
     setSaving(true);
 
+    if (editingSupplierId) {
+      const { error } = await supabase
+        .from("suppliers")
+        .update({
+          name: name.trim(),
+          email: email.trim() || null,
+          phone: phone.trim() || null,
+          address: address.trim() || null,
+        })
+        .eq("id", editingSupplierId)
+        .eq("company_id", companyId);
+
+      setSaving(false);
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      resetForm();
+      await loadSuppliers(companyId);
+      alert("Supplier successfully update ho gaya.");
+      return;
+    }
+
     const { error } = await supabase.from("suppliers").insert({
       company_id: companyId,
       name: name.trim(),
@@ -110,25 +160,62 @@ export default function SuppliersPage() {
       return;
     }
 
-    setName("");
-    setEmail("");
-    setPhone("");
-    setAddress("");
+    resetForm();
+    await loadSuppliers(companyId);
+    alert("Supplier successfully add ho gaya.");
+  }
+
+  async function handleDeleteSupplier(supplier: Supplier) {
+    const confirmed = window.confirm(
+      '"' + supplier.name + '" ko delete karna hai?'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(supplier.id);
+
+    const { error } = await supabase
+      .from("suppliers")
+      .delete()
+      .eq("id", supplier.id)
+      .eq("company_id", companyId);
+
+    setDeletingId(null);
+
+    if (error) {
+      const message = error.message.toLowerCase();
+
+      if (
+        message.includes("foreign key") ||
+        message.includes("violates")
+      ) {
+        alert(
+          "Ye supplier kisi purchase ke saath linked hai, isliye delete nahi ho sakta."
+        );
+        return;
+      }
+
+      alert(error.message);
+      return;
+    }
+
+    if (editingSupplierId === supplier.id) {
+      resetForm();
+    }
 
     await loadSuppliers(companyId);
+    alert("Supplier delete ho gaya.");
   }
 
   if (loading) {
-    return (
-      <main style={loadingStyle}>
-        Loading...
-      </main>
-    );
+    return <main style={loadingStyle}>Loading...</main>;
   }
 
   return (
     <main style={pageStyle}>
-      <div style={{ maxWidth: "1100px", margin: "0 auto" }}>
+      <div style={{ maxWidth: "1150px", margin: "0 auto" }}>
         <button
           type="button"
           onClick={() => router.push("/dashboard")}
@@ -144,7 +231,7 @@ export default function SuppliersPage() {
             </h1>
 
             <p style={{ color: "#667085" }}>
-              Supplier records add aur manage karo.
+              Supplier records add, edit aur manage karo.
             </p>
           </div>
 
@@ -154,11 +241,18 @@ export default function SuppliersPage() {
         </div>
 
         <div style={gridStyle}>
-          <form
-            onSubmit={handleAddSupplier}
-            style={cardStyle}
-          >
-            <h2 style={{ marginTop: 0 }}>Add Supplier</h2>
+          <form onSubmit={handleSaveSupplier} style={cardStyle}>
+            <h2 style={{ marginTop: 0 }}>
+              {editingSupplierId
+                ? "Edit Supplier"
+                : "Add Supplier"}
+            </h2>
+
+            {editingSupplierId && (
+              <div style={editNoticeStyle}>
+                Supplier edit mode active hai.
+              </div>
+            )}
 
             <input
               value={name}
@@ -197,18 +291,32 @@ export default function SuppliersPage() {
               type="submit"
               disabled={saving}
               style={{
-                width: "100%",
-                padding: "13px",
-                border: "none",
-                borderRadius: "8px",
-                backgroundColor: saving ? "#93c5fd" : "#2563eb",
-                color: "#ffffff",
-                cursor: saving ? "not-allowed" : "pointer",
-                fontSize: "16px",
+                ...primaryButtonStyle,
+                backgroundColor: saving
+                  ? "#93c5fd"
+                  : "#2563eb",
+                cursor: saving
+                  ? "not-allowed"
+                  : "pointer",
               }}
             >
-              {saving ? "Saving..." : "Add Supplier"}
+              {saving
+                ? "Saving..."
+                : editingSupplierId
+                ? "Update Supplier"
+                : "Add Supplier"}
             </button>
+
+            {editingSupplierId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                disabled={saving}
+                style={cancelButtonStyle}
+              >
+                Cancel Edit
+              </button>
+            )}
           </form>
 
           <section style={cardStyle}>
@@ -227,6 +335,7 @@ export default function SuppliersPage() {
                       <th style={tableHeaderStyle}>Email</th>
                       <th style={tableHeaderStyle}>Phone</th>
                       <th style={tableHeaderStyle}>Address</th>
+                      <th style={tableHeaderStyle}>Actions</th>
                     </tr>
                   </thead>
 
@@ -247,6 +356,43 @@ export default function SuppliersPage() {
 
                         <td style={tableCellStyle}>
                           {supplier.address || "-"}
+                        </td>
+
+                        <td style={tableCellStyle}>
+                          <div style={actionButtonsStyle}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleEditSupplier(supplier)
+                              }
+                              style={editButtonStyle}
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteSupplier(supplier)
+                              }
+                              disabled={deletingId === supplier.id}
+                              style={{
+                                ...deleteButtonStyle,
+                                cursor:
+                                  deletingId === supplier.id
+                                    ? "not-allowed"
+                                    : "pointer",
+                                opacity:
+                                  deletingId === supplier.id
+                                    ? 0.6
+                                    : 1,
+                              }}
+                            >
+                              {deletingId === supplier.id
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -302,7 +448,7 @@ const counterStyle: React.CSSProperties = {
 
 const gridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "360px 1fr",
+  gridTemplateColumns: "360px minmax(0, 1fr)",
   gap: "24px",
 };
 
@@ -314,6 +460,16 @@ const cardStyle: React.CSSProperties = {
   boxShadow: "0 5px 18px rgba(16,24,40,0.06)",
 };
 
+const editNoticeStyle: React.CSSProperties = {
+  backgroundColor: "#eff6ff",
+  border: "1px solid #bfdbfe",
+  color: "#1d4ed8",
+  padding: "10px 12px",
+  borderRadius: "8px",
+  marginBottom: "14px",
+  fontSize: "14px",
+};
+
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px",
@@ -322,6 +478,28 @@ const inputStyle: React.CSSProperties = {
   borderRadius: "8px",
   boxSizing: "border-box",
   fontSize: "15px",
+  backgroundColor: "#ffffff",
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "13px",
+  border: "none",
+  borderRadius: "8px",
+  color: "#ffffff",
+  fontSize: "16px",
+};
+
+const cancelButtonStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "12px",
+  border: "1px solid #d0d5dd",
+  borderRadius: "8px",
+  backgroundColor: "#ffffff",
+  color: "#344054",
+  cursor: "pointer",
+  fontSize: "15px",
+  marginTop: "10px",
 };
 
 const emptyStyle: React.CSSProperties = {
@@ -341,10 +519,37 @@ const tableHeaderStyle: React.CSSProperties = {
   borderBottom: "1px solid #eaecf0",
   color: "#667085",
   fontSize: "14px",
+  whiteSpace: "nowrap",
 };
 
 const tableCellStyle: React.CSSProperties = {
   padding: "14px 12px",
   borderBottom: "1px solid #f2f4f7",
   fontSize: "14px",
+  verticalAlign: "top",
+};
+
+const actionButtonsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "8px",
+  alignItems: "center",
+};
+
+const editButtonStyle: React.CSSProperties = {
+  border: "1px solid #93c5fd",
+  borderRadius: "7px",
+  padding: "7px 11px",
+  backgroundColor: "#eff6ff",
+  color: "#1d4ed8",
+  cursor: "pointer",
+  fontSize: "13px",
+};
+
+const deleteButtonStyle: React.CSSProperties = {
+  border: "1px solid #fda29b",
+  borderRadius: "7px",
+  padding: "7px 11px",
+  backgroundColor: "#fff5f5",
+  color: "#b42318",
+  fontSize: "13px",
 };
