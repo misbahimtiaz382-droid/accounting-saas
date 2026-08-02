@@ -163,14 +163,14 @@ export default function DashboardPage() {
 
   const menuItems = [
     { label: "Dashboard", path: "/dashboard" },
-    { label: "Customers", path: "/customers" },
+    { label: "Customers", path: "/customer" },
     { label: "Suppliers", path: "/suppliers" },
-    { label: "Products", path: "/products" },
+    { label: "Products", path: "/product" },
     { label: "Sales", path: "/sales" },
-    { label: "Purchases", path: "/purchases" },
+    { label: "Purchases", path: "/purchase" },
     { label: "Expenses", path: "/expenses" },
     { label: "Payments", path: "/payments" },
-    { label: "Reports", path: "/reports" },
+    { label: "Reports", path: "/report" },
     { label: "Settings", path: "/settings" },
   ];
 
