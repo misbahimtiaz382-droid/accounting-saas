@@ -14,6 +14,7 @@ export default function DashboardPage() {
 
   const [loading, setLoading] = useState(true);
   const [companyName, setCompanyName] = useState("");
+  const [userRole, setUserRole] = useState("");
 
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [totalPurchases, setTotalPurchases] = useState(0);
@@ -37,20 +38,14 @@ export default function DashboardPage() {
       return;
     }
 
-    const { data: membership, error: membershipError } = await supabase
+    const { data: membership, error } = await supabase
       .from("company_members")
-      .select("company_id, companies(name)")
+      .select("company_id, role, companies(name)")
       .eq("user_id", user.id)
       .limit(1)
       .maybeSingle();
 
-    if (membershipError) {
-      alert(membershipError.message);
-      setLoading(false);
-      return;
-    }
-
-    if (!membership) {
+    if (error || !membership) {
       router.replace("/");
       return;
     }
@@ -60,13 +55,14 @@ export default function DashboardPage() {
     };
 
     setCompanyName(company?.name || "My Company");
+    setUserRole(membership.role);
 
     await loadDashboardStats(membership.company_id);
 
     setLoading(false);
   }
 
-  async function loadDashboardStats(currentCompanyId: string) {
+  async function loadDashboardStats(companyId: string) {
     const [
       salesResult,
       purchasesResult,
@@ -77,76 +73,61 @@ export default function DashboardPage() {
       supabase
         .from("sales")
         .select("total_amount")
-        .eq("company_id", currentCompanyId),
+        .eq("company_id", companyId),
 
       supabase
         .from("purchases")
         .select("total_amount")
-        .eq("company_id", currentCompanyId),
+        .eq("company_id", companyId),
 
       supabase
         .from("expenses")
         .select("amount")
-        .eq("company_id", currentCompanyId),
+        .eq("company_id", companyId),
 
       supabase
         .from("customers")
         .select("id", { count: "exact", head: true })
-        .eq("company_id", currentCompanyId),
+        .eq("company_id", companyId),
 
       supabase
         .from("products")
         .select("id", { count: "exact", head: true })
-        .eq("company_id", currentCompanyId),
+        .eq("company_id", companyId),
     ]);
 
-    if (salesResult.error) {
-      alert(salesResult.error.message);
-      return;
-    }
+    const sales =
+      (salesResult.data ?? []) as AmountRow[];
 
-    if (purchasesResult.error) {
-      alert(purchasesResult.error.message);
-      return;
-    }
+    const purchases =
+      (purchasesResult.data ?? []) as AmountRow[];
 
-    if (expensesResult.error) {
-      alert(expensesResult.error.message);
-      return;
-    }
+    const expenses =
+      (expensesResult.data ?? []) as AmountRow[];
 
-    if (customersResult.error) {
-      alert(customersResult.error.message);
-      return;
-    }
-
-    if (productsResult.error) {
-      alert(productsResult.error.message);
-      return;
-    }
-
-    const sales = (salesResult.data ?? []) as AmountRow[];
-    const purchases = (purchasesResult.data ?? []) as AmountRow[];
-    const expenses = (expensesResult.data ?? []) as AmountRow[];
-
-    const revenue = sales.reduce(
-      (sum, sale) => sum + Number(sale.total_amount || 0),
-      0
+    setTotalRevenue(
+      sales.reduce(
+        (sum, item) =>
+          sum + Number(item.total_amount || 0),
+        0
+      )
     );
 
-    const purchaseTotal = purchases.reduce(
-      (sum, purchase) => sum + Number(purchase.total_amount || 0),
-      0
+    setTotalPurchases(
+      purchases.reduce(
+        (sum, item) =>
+          sum + Number(item.total_amount || 0),
+        0
+      )
     );
 
-    const expenseTotal = expenses.reduce(
-      (sum, expense) => sum + Number(expense.amount || 0),
-      0
+    setTotalExpenses(
+      expenses.reduce(
+        (sum, item) =>
+          sum + Number(item.amount || 0),
+        0
+      )
     );
-
-    setTotalRevenue(revenue);
-    setTotalPurchases(purchaseTotal);
-    setTotalExpenses(expenseTotal);
 
     setTotalSales(sales.length);
     setTotalCustomers(customersResult.count ?? 0);
@@ -161,7 +142,7 @@ export default function DashboardPage() {
   const cashProfit =
     totalRevenue - totalPurchases - totalExpenses;
 
-  const menuItems = [
+  const allMenuItems = [
     { label: "Dashboard", path: "/dashboard" },
     { label: "Customers", path: "/customer" },
     { label: "Suppliers", path: "/suppliers" },
@@ -174,6 +155,19 @@ export default function DashboardPage() {
     { label: "Team", path: "/team" },
     { label: "Settings", path: "/settings" },
   ];
+
+  const menuItems =
+    userRole === "staff"
+      ? allMenuItems.filter((item) =>
+          [
+            "Dashboard",
+            "Customers",
+            "Products",
+            "Sales",
+            "Payments",
+          ].includes(item.label)
+        )
+      : allMenuItems;
 
   const cards = [
     {
@@ -205,7 +199,6 @@ export default function DashboardPage() {
       value: totalProducts.toString(),
     },
   ];
-
   if (loading) {
     return (
       <main style={loadingStyle}>
@@ -297,6 +290,16 @@ export default function DashboardPage() {
             >
               {companyName} ka business overview.
             </p>
+
+            <p
+              style={{
+                marginTop: "5px",
+                color: "#2563eb",
+                fontWeight: "600",
+              }}
+            >
+              Role: {userRole}
+            </p>
           </div>
 
           <button
@@ -366,7 +369,6 @@ const loadingStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  fontFamily: "Arial",
 };
 
 const sidebarStyle: React.CSSProperties = {
@@ -387,7 +389,6 @@ const logoutButtonStyle: React.CSSProperties = {
   backgroundColor: "transparent",
   color: "#ffffff",
   cursor: "pointer",
-  fontSize: "15px",
 };
 
 const headerStyle: React.CSSProperties = {
