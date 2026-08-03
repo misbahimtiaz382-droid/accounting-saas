@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import React, { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
@@ -12,7 +12,6 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-
   const [loading, setLoading] = useState(false);
 
   async function handleSignup(
@@ -22,11 +21,6 @@ export default function SignupPage() {
 
     if (!fullName.trim()) {
       alert("Full name likho.");
-      return;
-    }
-
-    if (!companyName.trim()) {
-      alert("Company name likho.");
       return;
     }
 
@@ -47,9 +41,11 @@ export default function SignupPage() {
 
     setLoading(true);
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const { data, error: signupError } =
       await supabase.auth.signUp({
-        email: email.trim(),
+        email: normalizedEmail,
         password,
         options: {
           data: {
@@ -64,14 +60,72 @@ export default function SignupPage() {
       return;
     }
 
+    /*
+      Agar email confirmation ON hai to signup ke foran baad
+      session nahi milega. User email verify karke login karega.
+      Login page invitation accept function chalayega.
+    */
     if (!data.session) {
       setLoading(false);
 
       alert(
-        "Account create ho gaya. Apni email verify karo, phir login karke company setup complete karo."
+        "Account create ho gaya. Email verify karke login karo."
       );
 
       router.push("/");
+      return;
+    }
+
+    /*
+      Pehle pending invitation accept karne ki koshish hogi.
+      Invitation mil gayi to user invited company me Staff/Manager
+      role ke saath add ho jayega.
+    */
+    const { error: invitationError } = await supabase.rpc(
+      "accept_my_team_invitation"
+    );
+
+    if (!invitationError) {
+      setLoading(false);
+
+      alert(
+        "Account create ho gaya aur aap invited company me join ho gaye."
+      );
+
+      router.replace("/dashboard");
+      return;
+    }
+
+    const invitationMessage =
+      invitationError.message.toLowerCase();
+
+    const invitationNotFound =
+      invitationMessage.includes(
+        "pending invitation not found"
+      );
+
+    /*
+      Pending invitation na milna normal hai:
+      iska matlab user apni new company bana raha hai.
+
+      Iske ilawa koi error ho to company create nahi hogi.
+    */
+    if (!invitationNotFound) {
+      setLoading(false);
+      alert(invitationError.message);
+      return;
+    }
+
+    /*
+      Invitation nahi mili, isliye ab company name compulsory hai.
+    */
+    if (!companyName.trim()) {
+      setLoading(false);
+
+      alert(
+        "Agar aapko team invitation nahi mili to Company Name likhna zaroori hai."
+      );
+
       return;
     }
 
@@ -111,7 +165,8 @@ export default function SignupPage() {
                 color: "#667085",
               }}
             >
-              Apni company ka accounting workspace banao.
+              Apni company banao ya team invitation accept
+              karo.
             </p>
           </div>
         </div>
@@ -125,10 +180,17 @@ export default function SignupPage() {
               setFullName(event.target.value)
             }
             placeholder="Your full name"
+            autoComplete="name"
             style={inputStyle}
           />
 
-          <label style={labelStyle}>Company Name</label>
+          <label style={labelStyle}>
+            Company Name
+            <span style={optionalTextStyle}>
+              {" "}
+              — invited staff ke liye optional
+            </span>
+          </label>
 
           <input
             value={companyName}
@@ -136,6 +198,7 @@ export default function SignupPage() {
               setCompanyName(event.target.value)
             }
             placeholder="Your company name"
+            autoComplete="organization"
             style={inputStyle}
           />
 
@@ -144,7 +207,9 @@ export default function SignupPage() {
           <input
             type="email"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) =>
+              setEmail(event.target.value)
+            }
             placeholder="you@company.com"
             autoComplete="email"
             style={inputStyle}
@@ -175,7 +240,9 @@ export default function SignupPage() {
                 type="password"
                 value={confirmPassword}
                 onChange={(event) =>
-                  setConfirmPassword(event.target.value)
+                  setConfirmPassword(
+                    event.target.value
+                  )
                 }
                 placeholder="Repeat password"
                 autoComplete="new-password"
@@ -197,21 +264,26 @@ export default function SignupPage() {
                 : "pointer",
             }}
           >
-            {loading ? "Creating account..." : "Create Account"}
+            {loading
+              ? "Creating account..."
+              : "Create Account"}
           </button>
         </form>
 
         <div style={dividerStyle}>
           <span style={dividerLineStyle} />
+
           <span style={dividerTextStyle}>
             Already registered?
           </span>
+
           <span style={dividerLineStyle} />
         </div>
 
         <button
           type="button"
           onClick={() => router.push("/")}
+          disabled={loading}
           style={loginButtonStyle}
         >
           Go to Login
@@ -245,7 +317,8 @@ const cardStyle: React.CSSProperties = {
   padding: "36px",
   borderRadius: "20px",
   backgroundColor: "#ffffff",
-  boxShadow: "0 24px 65px rgba(15, 23, 42, 0.28)",
+  boxShadow:
+    "0 24px 65px rgba(15, 23, 42, 0.28)",
   boxSizing: "border-box",
 };
 
@@ -276,6 +349,12 @@ const labelStyle: React.CSSProperties = {
   color: "#344054",
   fontSize: "14px",
   fontWeight: "600",
+};
+
+const optionalTextStyle: React.CSSProperties = {
+  color: "#98a2b3",
+  fontWeight: "400",
+  fontSize: "12px",
 };
 
 const inputStyle: React.CSSProperties = {
