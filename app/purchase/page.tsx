@@ -4,523 +4,861 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
+
 type Supplier = {
-  id: string;
-  name: string;
+  id:string;
+  name:string;
 };
+
 
 type Product = {
-  id: string;
-  name: string;
-  purchase_price: number | null;
-  stock_quantity: number | null;
+  id:string;
+  name:string;
+  purchase_price:number | null;
+  stock_quantity:number | null;
 };
 
+
 type Purchase = {
-  id: string;
-  invoice_number: string | null;
-  total_amount: number | null;
-  created_at: string;
-  suppliers: {
-    name: string;
+  id:string;
+  invoice_number:string | null;
+  total_amount:number | null;
+  payment_status:string | null;
+  created_at:string;
+
+  suppliers:{
+    name:string;
   } | null;
 };
 
-export default function PurchasesPage() {
-  const router = useRouter();
-
-  const [companyId, setCompanyId] = useState("");
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [purchases, setPurchases] = useState<Purchase[]>([]);
-
-  const [supplierId, setSupplierId] = useState("");
-  const [productId, setProductId] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [unitPrice, setUnitPrice] = useState("");
-
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    loadPage();
-  }, []);
-
-  const selectedProduct = products.find(
-    (product) => product.id === productId
-  );
-
-  const purchaseQuantity = Number(quantity || 0);
-  const purchasePrice = Number(unitPrice || 0);
-  const totalAmount = purchaseQuantity * purchasePrice;
-
-  async function loadPage() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      router.replace("/");
-      return;
-    }
-
-    const { data: membership, error: membershipError } = await supabase
-      .from("company_members")
-      .select("company_id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle();
-
-    if (membershipError) {
-      alert(membershipError.message);
-      setLoading(false);
-      return;
-    }
-
-    if (!membership) {
-      router.replace("/dashboard");
-      return;
-    }
-
-    setCompanyId(membership.company_id);
-
-    await Promise.all([
-      loadSuppliers(membership.company_id),
-      loadProducts(membership.company_id),
-      loadPurchases(membership.company_id),
-    ]);
-
-    setLoading(false);
-  }
-
-  async function loadSuppliers(currentCompanyId: string) {
-    const { data, error } = await supabase
-      .from("suppliers")
-      .select("id, name")
-      .eq("company_id", currentCompanyId)
-      .order("name");
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    setSuppliers(data ?? []);
-  }
-
-  async function loadProducts(currentCompanyId: string) {
-    const { data, error } = await supabase
-      .from("products")
-      .select("id, name, purchase_price, stock_quantity")
-      .eq("company_id", currentCompanyId)
-      .order("name");
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    setProducts(data ?? []);
-  }
-
-  async function loadPurchases(currentCompanyId: string) {
-    const { data, error } = await supabase
-      .from("purchases")
-      .select(
-        "id, invoice_number, total_amount, created_at, suppliers(name)"
-      )
-      .eq("company_id", currentCompanyId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    setPurchases((data as unknown as Purchase[]) ?? []);
-  }
-
-  function handleProductChange(value: string) {
-    setProductId(value);
-
-    const product = products.find((item) => item.id === value);
-
-    if (product) {
-      setUnitPrice(String(Number(product.purchase_price || 0)));
-    } else {
-      setUnitPrice("");
-    }
-  }
-
-  async function handleCreatePurchase(
-    event: FormEvent<HTMLFormElement>
-  ) {
-    event.preventDefault();
-
-    if (!supplierId) {
-      alert("Supplier select karo.");
-      return;
-    }
-
-    if (!productId) {
-      alert("Product select karo.");
-      return;
-    }
-
-    if (purchaseQuantity <= 0) {
-      alert("Quantity 1 ya us se zyada honi chahiye.");
-      return;
-    }
-
-    if (purchasePrice < 0) {
-      alert("Purchase price sahi likho.");
-      return;
-    }
-
-    if (!selectedProduct) {
-      alert("Product load nahi hua.");
-      return;
-    }
-
-    setSaving(true);
-
-    const { data: purchase, error: purchaseError } = await supabase
-      .from("purchases")
-      .insert({
-        company_id: companyId,
-        supplier_id: supplierId,
-        total_amount: totalAmount,
-      })
-      .select("id")
-      .single();
-
-    if (purchaseError) {
-      setSaving(false);
-      alert(purchaseError.message);
-      return;
-    }
-
-    const { error: itemError } = await supabase
-      .from("purchase_items")
-      .insert({
-        purchase_id: purchase.id,
-        product_id: productId,
-        quantity: purchaseQuantity,
-        unit_price: purchasePrice,
-        total_price: totalAmount,
-      });
-
-    if (itemError) {
-      setSaving(false);
-      alert(itemError.message);
-      return;
-    }
-
-    const oldStock = Number(selectedProduct.stock_quantity || 0);
-
-    const { error: stockError } = await supabase
-      .from("products")
-      .update({
-        stock_quantity: oldStock + purchaseQuantity,
-        purchase_price: purchasePrice,
-      })
-      .eq("id", productId)
-      .eq("company_id", companyId);
-
-    setSaving(false);
-
-    if (stockError) {
-      alert(stockError.message);
-      return;
-    }
-
-    setSupplierId("");
-    setProductId("");
-    setQuantity("1");
-    setUnitPrice("");
-
-    await Promise.all([
-      loadProducts(companyId),
-      loadPurchases(companyId),
-    ]);
-
-    alert("Purchase successfully save ho gayi.");
-  }
-
-  if (loading) {
-    return <main style={loadingStyle}>Loading...</main>;
-  }
-
-  return (
-    <main style={pageStyle}>
-      <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
-        <button
-          type="button"
-          onClick={() => router.push("/dashboard")}
-          style={backButtonStyle}
-        >
-          ← Back to Dashboard
-        </button>
-
-        <div style={headingRowStyle}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: "30px" }}>
-              Purchases
-            </h1>
-
-            <p style={{ color: "#667085" }}>
-              Supplier purchases aur product stock manage karo.
-            </p>
-          </div>
-
-          <div style={counterStyle}>
-            Total Purchases: <strong>{purchases.length}</strong>
-          </div>
-        </div>
-
-        <div style={gridStyle}>
-          <form onSubmit={handleCreatePurchase} style={cardStyle}>
-            <h2 style={{ marginTop: 0 }}>Create Purchase</h2>
-
-            <select
-              value={supplierId}
-              onChange={(event) => setSupplierId(event.target.value)}
-              style={inputStyle}
-            >
-              <option value="">Select supplier</option>
-
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={productId}
-              onChange={(event) =>
-                handleProductChange(event.target.value)
-              }
-              style={inputStyle}
-            >
-              <option value="">Select product</option>
-
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name} — Current stock:{" "}
-                  {product.stock_quantity || 0}
-                </option>
-              ))}
-            </select>
-
-            <input
-              type="number"
-              min="1"
-              value={quantity}
-              onChange={(event) => setQuantity(event.target.value)}
-              placeholder="Quantity"
-              style={inputStyle}
-            />
-
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={unitPrice}
-              onChange={(event) => setUnitPrice(event.target.value)}
-              placeholder="Purchase price"
-              style={inputStyle}
-            />
-
-            <div style={totalBoxStyle}>
-              <div>
-                Quantity
-                <strong style={{ display: "block", marginTop: "5px" }}>
-                  {purchaseQuantity}
-                </strong>
-              </div>
-
-              <div>
-                Total
-                <strong style={{ display: "block", marginTop: "5px" }}>
-                  Rs. {totalAmount.toFixed(2)}
-                </strong>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={saving}
-              style={{
-                ...saveButtonStyle,
-                backgroundColor: saving ? "#93c5fd" : "#2563eb",
-                cursor: saving ? "not-allowed" : "pointer",
-              }}
-            >
-              {saving ? "Saving..." : "Create Purchase"}
-            </button>
-          </form>
-
-          <section style={cardStyle}>
-            <h2 style={{ marginTop: 0 }}>Recent Purchases</h2>
-
-            {purchases.length === 0 ? (
-              <p style={emptyStyle}>
-                Abhi koi purchase create nahi hui.
-              </p>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table style={tableStyle}>
-                  <thead>
-                    <tr>
-                      <th style={tableHeaderStyle}>Invoice</th>
-                      <th style={tableHeaderStyle}>Supplier</th>
-                      <th style={tableHeaderStyle}>Amount</th>
-                      <th style={tableHeaderStyle}>Date</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {purchases.map((purchase) => (
-                      <tr key={purchase.id}>
-                        <td style={tableCellStyle}>
-                          {purchase.invoice_number || "-"}
-                        </td>
-
-                        <td style={tableCellStyle}>
-                          {purchase.suppliers?.name || "-"}
-                        </td>
-
-                        <td style={tableCellStyle}>
-                          Rs.{" "}
-                          {Number(
-                            purchase.total_amount || 0
-                          ).toFixed(2)}
-                        </td>
-
-                        <td style={tableCellStyle}>
-                          {new Date(
-                            purchase.created_at
-                          ).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </div>
-      </div>
-    </main>
-  );
+
+export default function PurchasesPage(){
+
+const router = useRouter();
+
+
+const [companyId,setCompanyId] = useState("");
+
+const [suppliers,setSuppliers] = useState<Supplier[]>([]);
+const [products,setProducts] = useState<Product[]>([]);
+const [purchases,setPurchases] = useState<Purchase[]>([]);
+
+
+const [supplierId,setSupplierId] = useState("");
+const [productId,setProductId] = useState("");
+
+const [quantity,setQuantity] = useState("1");
+const [unitPrice,setUnitPrice] = useState("");
+
+const [loading,setLoading] = useState(true);
+const [saving,setSaving] = useState(false);
+
+
+
+useEffect(()=>{
+loadPage();
+},[]);
+
+
+
+async function loadPage(){
+
+const {
+data:{user}
+}= await supabase.auth.getUser();
+
+
+if(!user){
+router.replace("/");
+return;
 }
 
-const pageStyle: React.CSSProperties = {
-  minHeight: "100vh",
-  backgroundColor: "#f4f7fb",
-  padding: "32px",
-  fontFamily: "Arial, Helvetica, sans-serif",
-  color: "#172033",
+
+const {data:membership}=await supabase
+.from("company_members")
+.select("company_id")
+.eq("user_id",user.id)
+.single();
+
+
+if(!membership){
+router.replace("/dashboard");
+return;
+}
+
+
+setCompanyId(membership.company_id);
+
+
+
+await Promise.all([
+loadSuppliers(membership.company_id),
+loadProducts(membership.company_id),
+loadPurchases(membership.company_id)
+]);
+
+
+setLoading(false);
+
+}
+
+
+
+async function loadSuppliers(id:string){
+
+const {data,error}=await supabase
+.from("suppliers")
+.select("id,name")
+.eq("company_id",id);
+
+
+if(error){
+alert(error.message);
+return;
+}
+
+
+setSuppliers(data || []);
+
+}
+
+
+
+
+async function loadProducts(id:string){
+
+const {data,error}=await supabase
+.from("products")
+.select("id,name,purchase_price,stock_quantity")
+.eq("company_id",id);
+
+
+if(error){
+alert(error.message);
+return;
+}
+
+
+setProducts(data || []);
+
+}
+
+
+
+
+async function loadPurchases(id:string){
+
+const {data,error}=await supabase
+.from("purchases")
+.select(`
+id,
+invoice_number,
+total_amount,
+payment_status,
+created_at,
+suppliers(name)
+`)
+.eq("company_id",id)
+.order("created_at",{ascending:false});
+
+
+if(error){
+alert(error.message);
+return;
+}
+
+
+setPurchases(data as any || []);
+
+}
+
+
+
+
+const selectedProduct =
+products.find(
+(item)=>item.id===productId
+);
+
+
+
+const totalAmount =
+Number(quantity || 0) *
+Number(unitPrice || 0);
+
+
+
+
+function handleProduct(value:string){
+
+setProductId(value);
+
+
+const product =
+products.find(
+(item)=>item.id===value
+);
+
+
+if(product){
+
+setUnitPrice(
+String(product.purchase_price || 0)
+);
+
+}
+
+}
+
+
+
+
+async function createPurchase(
+e:FormEvent
+){
+
+e.preventDefault();
+
+
+if(!supplierId || !productId){
+
+alert("Supplier aur Product select karo");
+return;
+
+}
+
+
+
+setSaving(true);
+
+
+
+const {data:purchase,error}=await supabase
+.from("purchases")
+.insert({
+
+company_id:companyId,
+supplier_id:supplierId,
+total_amount:totalAmount,
+payment_status:"unpaid"
+
+})
+.select()
+.single();
+
+
+
+if(error){
+
+alert(error.message);
+setSaving(false);
+return;
+
+}
+
+
+
+await supabase
+.from("purchase_items")
+.insert({
+
+purchase_id:purchase.id,
+product_id:productId,
+quantity:Number(quantity),
+unit_price:Number(unitPrice),
+total_price:totalAmount
+
+});
+
+
+
+if(selectedProduct){
+
+await supabase
+.from("products")
+.update({
+
+stock_quantity:
+Number(selectedProduct.stock_quantity || 0)
++
+Number(quantity),
+
+purchase_price:Number(unitPrice)
+
+})
+.eq("id",productId);
+
+}
+
+
+
+setSupplierId("");
+setProductId("");
+setQuantity("1");
+setUnitPrice("");
+
+
+await loadPurchases(companyId);
+await loadProducts(companyId);
+
+
+setSaving(false);
+
+
+alert("Purchase save hogi");
+
+}
+return (
+
+<main style={pageStyle}>
+
+<div style={containerStyle}>
+
+
+<button
+onClick={()=>router.push("/dashboard")}
+style={backStyle}
+>
+← Back to Dashboard
+</button>
+
+
+
+<div style={headerStyle}>
+
+<div>
+<h1>Purchases</h1>
+<p style={{color:"#667085"}}>
+Manage supplier purchases and stock
+</p>
+</div>
+
+
+<div style={counterStyle}>
+Total Purchases:
+<b>{purchases.length}</b>
+</div>
+
+
+</div>
+
+
+
+
+
+<div style={layoutStyle}>
+
+
+<form
+onSubmit={createPurchase}
+style={cardStyle}
+>
+
+
+<h2>Create Purchase</h2>
+
+
+
+<select
+value={supplierId}
+onChange={(e)=>setSupplierId(e.target.value)}
+style={inputStyle}
+>
+
+<option value="">
+Select Supplier
+</option>
+
+
+{
+suppliers.map((s)=>(
+<option
+key={s.id}
+value={s.id}
+>
+{s.name}
+</option>
+))
+}
+
+</select>
+
+
+
+
+
+<select
+value={productId}
+onChange={(e)=>handleProduct(e.target.value)}
+style={inputStyle}
+>
+
+
+<option value="">
+Select Product
+</option>
+
+
+{
+products.map((p)=>(
+
+<option
+key={p.id}
+value={p.id}
+>
+
+{p.name}
+
+</option>
+
+))
+}
+
+
+</select>
+
+
+
+
+<input
+
+type="number"
+
+value={quantity}
+
+onChange={(e)=>setQuantity(e.target.value)}
+
+placeholder="Quantity"
+
+style={inputStyle}
+
+/>
+
+
+
+<input
+
+type="number"
+
+value={unitPrice}
+
+onChange={(e)=>setUnitPrice(e.target.value)}
+
+placeholder="Purchase Price"
+
+style={inputStyle}
+
+/>
+
+
+
+<div style={totalBox}>
+
+<div>
+Quantity
+<b>{quantity}</b>
+</div>
+
+
+<div>
+Total
+<b>Rs {totalAmount}</b>
+</div>
+
+
+</div>
+
+
+
+
+
+<button
+
+disabled={saving}
+
+style={buttonStyle}
+
+>
+
+{
+saving?
+"Saving..."
+:
+"Create Purchase"
+}
+
+
+</button>
+
+
+
+</form>
+
+
+
+
+
+
+
+
+<section style={cardStyle}>
+
+
+<h2>
+Recent Purchases
+</h2>
+
+
+
+
+<div style={{overflowX:"auto"}}>
+
+
+<table style={tableStyle}>
+
+
+<thead>
+
+<tr>
+
+<th style={th}>
+Date
+</th>
+
+
+<th style={th}>
+Invoice
+</th>
+
+
+<th style={th}>
+Supplier
+</th>
+
+
+<th style={th}>
+Amount
+</th>
+
+
+<th style={th}>
+Payment
+</th>
+
+
+</tr>
+
+</thead>
+
+
+
+
+<tbody>
+
+
+{
+
+purchases.map((p)=>(
+
+
+<tr
+key={p.id}
+style={rowStyle}
+>
+
+
+
+<td style={td}>
+{
+new Date(
+p.created_at
+)
+.toLocaleDateString()
+}
+</td>
+
+
+
+<td style={td}>
+{
+p.invoice_number || "-"
+}
+</td>
+
+
+
+
+<td style={td}>
+{
+p.suppliers?.name || "-"
+}
+</td>
+
+
+
+
+<td style={td}>
+Rs {p.total_amount}
+</td>
+
+
+
+
+<td style={td}>
+
+<span style={statusStyle}>
+
+{
+p.payment_status
+}
+
+</span>
+
+</td>
+
+
+
+
+</tr>
+
+
+))
+
+}
+
+
+
+</tbody>
+
+
+</table>
+
+
+</div>
+
+
+
+</section>
+
+
+</div>
+
+
+
+</div>
+
+</main>
+
+
+);
+
+}
+
+
+
+
+const pageStyle:React.CSSProperties={
+
+minHeight:"100vh",
+
+background:"#f5f7fb",
+
+padding:"30px",
+
+fontFamily:"Arial"
+
 };
 
-const loadingStyle: React.CSSProperties = {
-  minHeight: "100vh",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontFamily: "Arial",
+
+
+const containerStyle:React.CSSProperties={
+
+maxWidth:"1200px",
+
+margin:"auto"
+
 };
 
-const backButtonStyle: React.CSSProperties = {
-  border: "none",
-  backgroundColor: "transparent",
-  color: "#2563eb",
-  cursor: "pointer",
-  marginBottom: "20px",
-  fontSize: "15px",
+
+
+const headerStyle:React.CSSProperties={
+
+display:"flex",
+
+justifyContent:"space-between",
+
+alignItems:"center",
+
+marginBottom:"25px"
+
 };
 
-const headingRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: "24px",
+
+
+const counterStyle:React.CSSProperties={
+
+background:"#fff",
+
+padding:"15px 20px",
+
+borderRadius:"12px",
+
+border:"1px solid #ddd"
+
 };
 
-const counterStyle: React.CSSProperties = {
-  backgroundColor: "#ffffff",
-  padding: "12px 18px",
-  borderRadius: "10px",
-  border: "1px solid #eaecf0",
+
+
+const backStyle:React.CSSProperties={
+
+border:"none",
+
+background:"none",
+
+color:"#2563eb",
+
+cursor:"pointer"
+
 };
 
-const gridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "390px 1fr",
-  gap: "24px",
+
+
+const layoutStyle:React.CSSProperties={
+
+display:"grid",
+
+gridTemplateColumns:"380px 1fr",
+
+gap:"25px"
+
 };
 
-const cardStyle: React.CSSProperties = {
-  backgroundColor: "#ffffff",
-  padding: "24px",
-  borderRadius: "14px",
-  border: "1px solid #eaecf0",
-  boxShadow: "0 5px 18px rgba(16,24,40,0.06)",
+
+
+const cardStyle:React.CSSProperties={
+
+background:"#fff",
+
+padding:"25px",
+
+borderRadius:"15px",
+
+border:"1px solid #e5e7eb"
+
 };
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "12px",
-  marginBottom: "14px",
-  border: "1px solid #d0d5dd",
-  borderRadius: "8px",
-  boxSizing: "border-box",
-  fontSize: "15px",
-  backgroundColor: "#ffffff",
+
+
+const inputStyle:React.CSSProperties={
+
+width:"100%",
+
+padding:"12px",
+
+marginBottom:"15px",
+
+border:"1px solid #ddd",
+
+borderRadius:"8px"
+
 };
 
-const totalBoxStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "12px",
-  backgroundColor: "#f8fafc",
-  border: "1px solid #eaecf0",
-  borderRadius: "10px",
-  padding: "16px",
-  marginBottom: "16px",
+
+
+const totalBox:React.CSSProperties={
+
+display:"flex",
+
+justifyContent:"space-between",
+
+padding:"15px",
+
+background:"#f8fafc",
+
+borderRadius:"10px",
+
+marginBottom:"15px"
+
 };
 
-const saveButtonStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "13px",
-  border: "none",
-  borderRadius: "8px",
-  color: "#ffffff",
-  fontSize: "16px",
+
+
+const buttonStyle:React.CSSProperties={
+
+width:"100%",
+
+padding:"13px",
+
+background:"#2563eb",
+
+color:"#fff",
+
+border:"none",
+
+borderRadius:"8px",
+
+cursor:"pointer"
+
 };
 
-const emptyStyle: React.CSSProperties = {
-  color: "#98a2b3",
-  textAlign: "center",
-  padding: "40px 0",
+
+
+const tableStyle:React.CSSProperties={
+
+width:"100%",
+
+borderCollapse:"separate",
+
+borderSpacing:"0 10px"
+
 };
 
-const tableStyle: React.CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
+
+
+const th:React.CSSProperties={
+
+background:"#f1f5f9",
+
+padding:"14px",
+
+textAlign:"left",
+
+fontSize:"14px"
+
 };
 
-const tableHeaderStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "12px",
-  borderBottom: "1px solid #eaecf0",
-  color: "#667085",
-  fontSize: "14px",
+
+
+const td:React.CSSProperties={
+
+padding:"15px",
+
+background:"#fff",
+
+borderTop:"1px solid #eee",
+
+borderBottom:"1px solid #eee"
+
 };
 
-const tableCellStyle: React.CSSProperties = {
-  padding: "14px 12px",
-  borderBottom: "1px solid #f2f4f7",
-  fontSize: "14px",
+
+
+const rowStyle:React.CSSProperties={
+
+boxShadow:"0 2px 8px rgba(0,0,0,0.05)"
+
+};
+
+
+
+const statusStyle:React.CSSProperties={
+
+background:"#fff3cd",
+
+padding:"6px 12px",
+
+borderRadius:"20px",
+
+fontSize:"13px"
+
 };
