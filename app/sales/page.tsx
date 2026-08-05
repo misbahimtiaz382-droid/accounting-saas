@@ -26,6 +26,7 @@ type Sale = {
   id: string;
   invoice_number: string | null;
   total_amount: number | null;
+  payment_status: string | null;
   created_at: string;
   customers: {
     name: string;
@@ -44,6 +45,10 @@ export default function SalesPage() {
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState("1");
 
+  const [discountAmount, setDiscountAmount] = useState("0");
+  const [taxAmount, setTaxAmount] = useState("0");
+  const [paymentStatus, setPaymentStatus] = useState("unpaid");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -57,7 +62,15 @@ export default function SalesPage() {
 
   const saleQuantity = Number(quantity || 0);
   const unitPrice = Number(selectedProduct?.sale_price || 0);
-  const totalAmount = saleQuantity * unitPrice;
+
+  const subtotal = saleQuantity * unitPrice;
+  const discount = Math.max(0, Number(discountAmount || 0));
+  const tax = Math.max(0, Number(taxAmount || 0));
+
+  const grandTotal = Math.max(
+    0,
+    subtotal - discount + tax
+  );
 
   async function loadPage() {
     setLoading(true);
@@ -141,13 +154,7 @@ export default function SalesPage() {
     const { data, error } = await supabase
       .from("sales")
       .select(
-        `
-        id,
-        invoice_number,
-        total_amount,
-        created_at,
-        customers(name)
-        `
+        "id, invoice_number, total_amount, payment_status, created_at, customers(name)"
       )
       .eq("company_id", currentCompanyId)
       .order("created_at", { ascending: false });
@@ -219,6 +226,11 @@ export default function SalesPage() {
       return;
     }
 
+    if (discount > subtotal) {
+      alert("Discount subtotal se zyada nahi ho sakta.");
+      return;
+    }
+
     setSaving(true);
 
     const invoiceNumber = createInvoiceNumber();
@@ -230,17 +242,22 @@ export default function SalesPage() {
           company_id: companyId,
           customer_id: customerId,
           invoice_number: invoiceNumber,
-          total_amount: totalAmount,
+          total_amount: grandTotal,
+          discount_amount: discount,
+          tax_amount: tax,
+          payment_status: paymentStatus,
         })
         .select("id")
         .single();
 
     if (saleError || !sale) {
       setSaving(false);
+
       alert(
         saleError?.message ||
           "Sale create nahi hui."
       );
+
       return;
     }
 
@@ -251,7 +268,7 @@ export default function SalesPage() {
         product_id: productId,
         quantity: saleQuantity,
         unit_price: unitPrice,
-        total_price: totalAmount,
+        total_price: subtotal,
       });
 
     if (itemError) {
@@ -285,6 +302,9 @@ export default function SalesPage() {
     setCustomerId("");
     setProductId("");
     setQuantity("1");
+    setDiscountAmount("0");
+    setTaxAmount("0");
+    setPaymentStatus("unpaid");
 
     await Promise.all([
       loadProducts(companyId),
@@ -292,7 +312,32 @@ export default function SalesPage() {
     ]);
 
     setSaving(false);
+
     alert("Sale successfully create ho gayi.");
+  }
+
+  function getStatusStyle(status: string | null) {
+    if (status === "paid") {
+      return paidStatusStyle;
+    }
+
+    if (status === "partial") {
+      return partialStatusStyle;
+    }
+
+    return unpaidStatusStyle;
+  }
+
+  function getStatusText(status: string | null) {
+    if (status === "paid") {
+      return "Paid";
+    }
+
+    if (status === "partial") {
+      return "Partial";
+    }
+
+    return "Unpaid";
   }
 
   if (loading) {
@@ -308,9 +353,7 @@ export default function SalesPage() {
       <div style={containerStyle}>
         <button
           type="button"
-          onClick={() =>
-            router.push("/dashboard")
-          }
+          onClick={() => router.push("/dashboard")}
           style={backButtonStyle}
         >
           ← Back to Dashboard
@@ -343,16 +386,14 @@ export default function SalesPage() {
             style={formCardStyle}
           >
             <div style={cardHeadingRowStyle}>
-              <div>
-                <h2 style={cardTitleStyle}>
-                  Create Sale
-                </h2>
+              <h2 style={cardTitleStyle}>
+                Create Sale
+              </h2>
 
-                <p style={cardSubtitleStyle}>
-                  Customer, product aur quantity select
-                  karo.
-                </p>
-              </div>
+              <p style={cardSubtitleStyle}>
+                Customer, product aur quantity select
+                karo.
+              </p>
             </div>
 
             <label style={labelStyle}>
@@ -423,26 +464,98 @@ export default function SalesPage() {
               style={inputStyle}
             />
 
-            <div style={priceSummaryStyle}>
-              <div style={summaryItemStyle}>
-                <span style={summaryLabelStyle}>
-                  Unit Price
-                </span>
+            <label style={labelStyle}>
+              Discount Amount
+            </label>
 
-                <strong style={summaryValueStyle}>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={discountAmount}
+              onChange={(event) =>
+                setDiscountAmount(event.target.value)
+              }
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>
+              Tax Amount
+            </label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={taxAmount}
+              onChange={(event) =>
+                setTaxAmount(event.target.value)
+              }
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>
+              Payment Status
+            </label>
+
+            <select
+              value={paymentStatus}
+              onChange={(event) =>
+                setPaymentStatus(event.target.value)
+              }
+              style={inputStyle}
+            >
+              <option value="unpaid">
+                Unpaid
+              </option>
+
+              <option value="paid">
+                Paid
+              </option>
+
+              <option value="partial">
+                Partial
+              </option>
+            </select>
+
+            <div style={priceDetailsStyle}>
+              <div style={priceRowStyle}>
+                <span>Unit Price</span>
+
+                <strong>
                   Rs. {unitPrice.toFixed(2)}
                 </strong>
               </div>
 
-              <div style={summaryDividerStyle} />
+              <div style={priceRowStyle}>
+                <span>Subtotal</span>
 
-              <div style={summaryItemStyle}>
-                <span style={summaryLabelStyle}>
-                  Total
-                </span>
+                <strong>
+                  Rs. {subtotal.toFixed(2)}
+                </strong>
+              </div>
 
-                <strong style={totalValueStyle}>
-                  Rs. {totalAmount.toFixed(2)}
+              <div style={priceRowStyle}>
+                <span>Discount</span>
+
+                <strong>
+                  - Rs. {discount.toFixed(2)}
+                </strong>
+              </div>
+
+              <div style={priceRowStyle}>
+                <span>Tax</span>
+
+                <strong>
+                  + Rs. {tax.toFixed(2)}
+                </strong>
+              </div>
+
+              <div style={grandTotalRowStyle}>
+                <span>Grand Total</span>
+
+                <strong>
+                  Rs. {grandTotal.toFixed(2)}
                 </strong>
               </div>
             </div>
@@ -512,6 +625,10 @@ export default function SalesPage() {
                       </th>
 
                       <th style={tableHeaderStyle}>
+                        Status
+                      </th>
+
+                      <th style={tableHeaderStyle}>
                         Invoice
                       </th>
 
@@ -559,6 +676,18 @@ export default function SalesPage() {
 
                         <td style={tableCellStyle}>
                           <span
+                            style={getStatusStyle(
+                              sale.payment_status
+                            )}
+                          >
+                            {getStatusText(
+                              sale.payment_status
+                            )}
+                          </span>
+                        </td>
+
+                        <td style={tableCellStyle}>
+                          <span
                             style={invoiceBadgeStyle}
                           >
                             {sale.invoice_number ||
@@ -596,8 +725,7 @@ const pageStyle: CSSProperties = {
   minHeight: "100vh",
   backgroundColor: "#f4f7fb",
   padding: "32px",
-  fontFamily:
-    "Arial, Helvetica, sans-serif",
+  fontFamily: "Arial, Helvetica, sans-serif",
   color: "#172033",
 };
 
@@ -612,7 +740,7 @@ const loadingStyle: CSSProperties = {
 };
 
 const containerStyle: CSSProperties = {
-  maxWidth: "1280px",
+  maxWidth: "1380px",
   margin: "0 auto",
 };
 
@@ -673,7 +801,7 @@ const countNumberStyle: CSSProperties = {
 const contentGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns:
-    "minmax(300px, 380px) minmax(0, 1fr)",
+    "minmax(320px, 410px) minmax(0, 1fr)",
   gap: "24px",
   alignItems: "start",
 };
@@ -734,44 +862,31 @@ const inputStyle: CSSProperties = {
   outline: "none",
 };
 
-const priceSummaryStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr auto 1fr",
-  alignItems: "center",
-  gap: "14px",
+const priceDetailsStyle: CSSProperties = {
   padding: "16px",
-  marginTop: "2px",
   marginBottom: "18px",
   backgroundColor: "#f8fafc",
   border: "1px solid #eaecf0",
   borderRadius: "11px",
 };
 
-const summaryItemStyle: CSSProperties = {
-  minWidth: 0,
+const priceRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  padding: "7px 0",
+  color: "#475467",
+  fontSize: "14px",
 };
 
-const summaryLabelStyle: CSSProperties = {
-  display: "block",
-  color: "#667085",
-  fontSize: "12px",
-  marginBottom: "5px",
-};
-
-const summaryValueStyle: CSSProperties = {
-  color: "#344054",
-  fontSize: "15px",
-};
-
-const totalValueStyle: CSSProperties = {
+const grandTotalRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  marginTop: "8px",
+  paddingTop: "13px",
+  borderTop: "1px solid #d0d5dd",
   color: "#2563eb",
   fontSize: "17px",
-};
-
-const summaryDividerStyle: CSSProperties = {
-  width: "1px",
-  height: "38px",
-  backgroundColor: "#e4e7ec",
+  fontWeight: "700",
 };
 
 const createButtonStyle: CSSProperties = {
@@ -812,7 +927,7 @@ const tableWrapperStyle: CSSProperties = {
 
 const tableStyle: CSSProperties = {
   width: "100%",
-  minWidth: "780px",
+  minWidth: "900px",
   borderCollapse: "separate",
   borderSpacing: 0,
 };
@@ -917,6 +1032,36 @@ const invoiceButtonStyle: CSSProperties = {
   fontSize: "12px",
   fontWeight: "700",
   whiteSpace: "nowrap",
+};
+
+const paidStatusStyle: CSSProperties = {
+  display: "inline-flex",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  backgroundColor: "#dcfce7",
+  color: "#15803d",
+  fontSize: "12px",
+  fontWeight: "700",
+};
+
+const unpaidStatusStyle: CSSProperties = {
+  display: "inline-flex",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  backgroundColor: "#fee2e2",
+  color: "#b91c1c",
+  fontSize: "12px",
+  fontWeight: "700",
+};
+
+const partialStatusStyle: CSSProperties = {
+  display: "inline-flex",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  backgroundColor: "#fef3c7",
+  color: "#b45309",
+  fontSize: "12px",
+  fontWeight: "700",
 };
 
 const emptyStateStyle: CSSProperties = {
