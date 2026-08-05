@@ -10,6 +10,7 @@ type Company = {
   phone: string | null;
   address: string | null;
   currency: string | null;
+  logo_url: string | null;
 };
 
 type Customer = {
@@ -36,6 +37,9 @@ type Invoice = {
   id: string;
   invoice_number: string | null;
   total_amount: number | null;
+  discount_amount: number | null;
+  tax_amount: number | null;
+  payment_status: string | null;
   created_at: string;
   companies: Company | null;
   customers: Customer | null;
@@ -62,9 +66,10 @@ export default function InvoicePage() {
 
     const {
       data: { user },
+      error: userError,
     } = await supabase.auth.getUser();
 
-    if (!user) {
+    if (userError || !user) {
       router.replace("/");
       return;
     }
@@ -75,13 +80,17 @@ export default function InvoicePage() {
         id,
         invoice_number,
         total_amount,
+        discount_amount,
+        tax_amount,
+        payment_status,
         created_at,
         companies (
           name,
           email,
           phone,
           address,
-          currency
+          currency,
+          logo_url
         ),
         customers (
           name,
@@ -117,12 +126,34 @@ export default function InvoicePage() {
     window.print();
   }
 
+  function getStatusText(status: string | null) {
+    if (status === "paid") return "Paid";
+    if (status === "partial") return "Partial";
+
+    return "Unpaid";
+  }
+
+  function getStatusStyle(status: string | null) {
+    if (status === "paid") return paidStatusStyle;
+    if (status === "partial") return partialStatusStyle;
+
+    return unpaidStatusStyle;
+  }
+
   if (loading) {
-    return <main style={loadingStyle}>Loading invoice...</main>;
+    return (
+      <main style={loadingStyle}>
+        Loading invoice...
+      </main>
+    );
   }
 
   if (!invoice) {
-    return <main style={loadingStyle}>Invoice nahi mili.</main>;
+    return (
+      <main style={loadingStyle}>
+        Invoice nahi mili.
+      </main>
+    );
   }
 
   const company = invoice.companies;
@@ -141,9 +172,27 @@ export default function InvoicePage() {
 
   const currency = getCurrencySymbol();
 
+  const subtotal = items.reduce((sum, item) => {
+    return sum + Number(item.total_price || 0);
+  }, 0);
+
+  const discount = Number(invoice.discount_amount || 0);
+  const tax = Number(invoice.tax_amount || 0);
+
+  const calculatedGrandTotal =
+    subtotal - discount + tax;
+
+  const grandTotal =
+    invoice.total_amount !== null
+      ? Number(invoice.total_amount)
+      : calculatedGrandTotal;
+
   return (
     <main style={pageStyle}>
-      <div className="invoice-actions" style={actionRowStyle}>
+      <div
+        className="invoice-actions"
+        style={actionRowStyle}
+      >
         <button
           type="button"
           onClick={() => router.push("/sales")}
@@ -163,70 +212,151 @@ export default function InvoicePage() {
 
       <section style={invoiceStyle}>
         <header style={invoiceHeaderStyle}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: "30px" }}>
-              {company?.name || "Accounting SaaS"}
-            </h1>
-
-            {company?.address && (
-              <p style={companyInfoStyle}>{company.address}</p>
+          <div style={companyBlockStyle}>
+            {company?.logo_url && (
+              <img
+                src={company.logo_url}
+                alt={company.name || "Company logo"}
+                style={logoStyle}
+              />
             )}
 
-            {company?.phone && (
-              <p style={companyInfoStyle}>{company.phone}</p>
-            )}
+            <div>
+              <h1 style={companyNameStyle}>
+                {company?.name || "Accounting SaaS"}
+              </h1>
 
-            {company?.email && (
-              <p style={companyInfoStyle}>{company.email}</p>
-            )}
+              {company?.address && (
+                <p style={companyInfoStyle}>
+                  {company.address}
+                </p>
+              )}
+
+              {company?.phone && (
+                <p style={companyInfoStyle}>
+                  {company.phone}
+                </p>
+              )}
+
+              {company?.email && (
+                <p style={companyInfoStyle}>
+                  {company.email}
+                </p>
+              )}
+            </div>
           </div>
 
-          <div style={{ textAlign: "right" }}>
-            <h2 style={{ margin: 0, fontSize: "28px" }}>
+          <div style={invoiceMetaContainerStyle}>
+            <h2 style={invoiceTitleStyle}>
               INVOICE
             </h2>
 
             <p style={invoiceMetaStyle}>
               <strong>Invoice:</strong>{" "}
-              {invoice.invoice_number || invoice.id.slice(0, 8)}
+              {invoice.invoice_number ||
+                invoice.id.slice(0, 8)}
             </p>
 
             <p style={invoiceMetaStyle}>
               <strong>Date:</strong>{" "}
-              {new Date(invoice.created_at).toLocaleDateString()}
+              {new Date(
+                invoice.created_at
+              ).toLocaleDateString()}
             </p>
+
+            <div style={statusRowStyle}>
+              <strong>Status:</strong>
+
+              <span
+                style={getStatusStyle(
+                  invoice.payment_status
+                )}
+              >
+                {getStatusText(
+                  invoice.payment_status
+                )}
+              </span>
+            </div>
           </div>
         </header>
 
         <div style={customerSectionStyle}>
-          <p style={sectionLabelStyle}>Bill To</p>
+          <p style={sectionLabelStyle}>
+            Bill To
+          </p>
 
-          <h3 style={{ margin: "6px 0" }}>
-            {customer?.name || "Walk-in Customer"}
-          </h3>
+          <div style={customerDetailsStyle}>
+            <div style={customerDetailRowStyle}>
+              <span style={customerLabelStyle}>
+                Name:
+              </span>
 
-          {customer?.phone && (
-            <p style={customerInfoStyle}>{customer.phone}</p>
-          )}
+              <span style={customerValueStyle}>
+                {customer?.name || "Walk-in Customer"}
+              </span>
+            </div>
 
-          {customer?.email && (
-            <p style={customerInfoStyle}>{customer.email}</p>
-          )}
+            {customer?.phone && (
+              <div style={customerDetailRowStyle}>
+                <span style={customerLabelStyle}>
+                  Phone:
+                </span>
 
-          {customer?.address && (
-            <p style={customerInfoStyle}>{customer.address}</p>
-          )}
+                <span style={customerValueStyle}>
+                  {customer.phone}
+                </span>
+              </div>
+            )}
+
+            {customer?.email && (
+              <div style={customerDetailRowStyle}>
+                <span style={customerLabelStyle}>
+                  Email:
+                </span>
+
+                <span style={customerValueStyle}>
+                  {customer.email}
+                </span>
+              </div>
+            )}
+
+            {customer?.address && (
+              <div style={customerDetailRowStyle}>
+                <span style={customerLabelStyle}>
+                  Address:
+                </span>
+
+                <span style={customerValueStyle}>
+                  {customer.address}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div style={{ overflowX: "auto" }}>
+        <div style={tableWrapperStyle}>
           <table style={tableStyle}>
             <thead>
               <tr>
-                <th style={tableHeaderStyle}>Product</th>
-                <th style={tableHeaderStyle}>SKU</th>
-                <th style={numberHeaderStyle}>Quantity</th>
-                <th style={numberHeaderStyle}>Rate</th>
-                <th style={numberHeaderStyle}>Total</th>
+                <th style={tableHeaderStyle}>
+                  Product
+                </th>
+
+                <th style={tableHeaderStyle}>
+                  SKU
+                </th>
+
+                <th style={numberHeaderStyle}>
+                  Quantity
+                </th>
+
+                <th style={numberHeaderStyle}>
+                  Rate
+                </th>
+
+                <th style={numberHeaderStyle}>
+                  Total
+                </th>
               </tr>
             </thead>
 
@@ -235,11 +365,7 @@ export default function InvoicePage() {
                 <tr>
                   <td
                     colSpan={5}
-                    style={{
-                      ...tableCellStyle,
-                      textAlign: "center",
-                      color: "#667085",
-                    }}
+                    style={emptyCellStyle}
                   >
                     Invoice items nahi mile.
                   </td>
@@ -261,12 +387,16 @@ export default function InvoicePage() {
 
                     <td style={numberCellStyle}>
                       {currency}
-                      {Number(item.unit_price || 0).toFixed(2)}
+                      {Number(
+                        item.unit_price || 0
+                      ).toFixed(2)}
                     </td>
 
                     <td style={numberCellStyle}>
                       {currency}
-                      {Number(item.total_price || 0).toFixed(2)}
+                      {Number(
+                        item.total_price || 0
+                      ).toFixed(2)}
                     </td>
                   </tr>
                 ))
@@ -281,7 +411,25 @@ export default function InvoicePage() {
 
             <strong>
               {currency}
-              {Number(invoice.total_amount || 0).toFixed(2)}
+              {subtotal.toFixed(2)}
+            </strong>
+          </div>
+
+          <div style={totalRowStyle}>
+            <span>Discount</span>
+
+            <strong style={discountValueStyle}>
+              - {currency}
+              {discount.toFixed(2)}
+            </strong>
+          </div>
+
+          <div style={totalRowStyle}>
+            <span>Tax</span>
+
+            <strong style={taxValueStyle}>
+              + {currency}
+              {tax.toFixed(2)}
             </strong>
           </div>
 
@@ -290,7 +438,7 @@ export default function InvoicePage() {
 
             <strong>
               {currency}
-              {Number(invoice.total_amount || 0).toFixed(2)}
+              {grandTotal.toFixed(2)}
             </strong>
           </div>
         </div>
@@ -333,7 +481,9 @@ const loadingStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "center",
   alignItems: "center",
-  fontFamily: "Arial",
+  backgroundColor: "#eef2f7",
+  fontFamily: "Arial, sans-serif",
+  color: "#475467",
 };
 
 const actionRowStyle: React.CSSProperties = {
@@ -351,6 +501,7 @@ const backButtonStyle: React.CSSProperties = {
   color: "#344054",
   padding: "11px 16px",
   cursor: "pointer",
+  fontWeight: "600",
 };
 
 const printButtonStyle: React.CSSProperties = {
@@ -360,7 +511,7 @@ const printButtonStyle: React.CSSProperties = {
   color: "#ffffff",
   padding: "11px 18px",
   cursor: "pointer",
-  fontWeight: "600",
+  fontWeight: "700",
 };
 
 const invoiceStyle: React.CSSProperties = {
@@ -369,15 +520,39 @@ const invoiceStyle: React.CSSProperties = {
   backgroundColor: "#ffffff",
   padding: "40px",
   borderRadius: "12px",
-  boxShadow: "0 10px 35px rgba(16,24,40,0.1)",
+  boxShadow:
+    "0 10px 35px rgba(16,24,40,0.1)",
 };
 
 const invoiceHeaderStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
+  alignItems: "flex-start",
   gap: "24px",
   paddingBottom: "25px",
   borderBottom: "2px solid #2563eb",
+};
+
+const companyBlockStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: "16px",
+};
+
+const logoStyle: React.CSSProperties = {
+  width: "74px",
+  height: "74px",
+  borderRadius: "10px",
+  objectFit: "contain",
+  border: "1px solid #eaecf0",
+  padding: "6px",
+  backgroundColor: "#ffffff",
+};
+
+const companyNameStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: "30px",
+  color: "#101828",
 };
 
 const companyInfoStyle: React.CSSProperties = {
@@ -386,10 +561,60 @@ const companyInfoStyle: React.CSSProperties = {
   fontSize: "14px",
 };
 
+const invoiceMetaContainerStyle: React.CSSProperties = {
+  textAlign: "right",
+};
+
+const invoiceTitleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: "28px",
+  color: "#101828",
+};
+
 const invoiceMetaStyle: React.CSSProperties = {
   margin: "8px 0 0",
   color: "#475467",
   fontSize: "14px",
+};
+
+const statusRowStyle: React.CSSProperties = {
+  marginTop: "10px",
+  display: "flex",
+  justifyContent: "flex-end",
+  alignItems: "center",
+  gap: "8px",
+  color: "#475467",
+  fontSize: "14px",
+};
+
+const paidStatusStyle: React.CSSProperties = {
+  display: "inline-flex",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  backgroundColor: "#dcfce7",
+  color: "#15803d",
+  fontSize: "12px",
+  fontWeight: "700",
+};
+
+const unpaidStatusStyle: React.CSSProperties = {
+  display: "inline-flex",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  backgroundColor: "#fee2e2",
+  color: "#b91c1c",
+  fontSize: "12px",
+  fontWeight: "700",
+};
+
+const partialStatusStyle: React.CSSProperties = {
+  display: "inline-flex",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  backgroundColor: "#fef3c7",
+  color: "#b45309",
+  fontSize: "12px",
+  fontWeight: "700",
 };
 
 const customerSectionStyle: React.CSSProperties = {
@@ -397,24 +622,50 @@ const customerSectionStyle: React.CSSProperties = {
   padding: "18px",
   backgroundColor: "#f8fafc",
   borderRadius: "10px",
+  border: "1px solid #eaecf0",
 };
 
 const sectionLabelStyle: React.CSSProperties = {
   margin: 0,
   color: "#667085",
-  fontSize: "13px",
+  fontSize: "12px",
   textTransform: "uppercase",
+  fontWeight: "700",
+  letterSpacing: "0.04em",
+};
+
+const customerDetailsStyle: React.CSSProperties = {
+  marginTop: "14px",
+  display: "grid",
+  gap: "10px",
+};
+
+const customerDetailRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "85px 1fr",
+  gap: "12px",
+  alignItems: "start",
+};
+
+const customerLabelStyle: React.CSSProperties = {
+  color: "#344054",
+  fontSize: "14px",
   fontWeight: "700",
 };
 
-const customerInfoStyle: React.CSSProperties = {
-  margin: "5px 0 0",
+const customerValueStyle: React.CSSProperties = {
   color: "#667085",
   fontSize: "14px",
+  wordBreak: "break-word",
+};
+
+const tableWrapperStyle: React.CSSProperties = {
+  overflowX: "auto",
 };
 
 const tableStyle: React.CSSProperties = {
   width: "100%",
+  minWidth: "650px",
   borderCollapse: "collapse",
 };
 
@@ -435,15 +686,23 @@ const tableCellStyle: React.CSSProperties = {
   padding: "14px 13px",
   borderBottom: "1px solid #eaecf0",
   fontSize: "14px",
+  color: "#475467",
 };
 
 const numberCellStyle: React.CSSProperties = {
   ...tableCellStyle,
   textAlign: "right",
+  whiteSpace: "nowrap",
+};
+
+const emptyCellStyle: React.CSSProperties = {
+  ...tableCellStyle,
+  textAlign: "center",
+  color: "#667085",
 };
 
 const totalsContainerStyle: React.CSSProperties = {
-  width: "330px",
+  width: "350px",
   marginLeft: "auto",
   marginTop: "28px",
 };
@@ -451,8 +710,17 @@ const totalsContainerStyle: React.CSSProperties = {
 const totalRowStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  padding: "12px 0",
+  padding: "11px 4px",
   borderBottom: "1px solid #eaecf0",
+  color: "#475467",
+};
+
+const discountValueStyle: React.CSSProperties = {
+  color: "#b91c1c",
+};
+
+const taxValueStyle: React.CSSProperties = {
+  color: "#15803d",
 };
 
 const grandTotalStyle: React.CSSProperties = {
