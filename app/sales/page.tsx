@@ -1,1034 +1,944 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  CSSProperties,
+  FormEvent,
+  useEffect,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
-
 type Customer = {
-  id:string;
-  name:string;
+  id: string;
+  name: string;
 };
-
 
 type Product = {
-  id:string;
-  name:string;
-  sale_price:number | null;
-  stock_quantity:number | null;
+  id: string;
+  name: string;
+  sku: string | null;
+  sale_price: number | null;
+  stock_quantity: number | null;
 };
 
-
 type Sale = {
-  id:string;
-  total_amount:number | null;
-  created_at:string;
-  customers:{
-    name:string;
+  id: string;
+  invoice_number: string | null;
+  total_amount: number | null;
+  created_at: string;
+  customers: {
+    name: string;
   } | null;
 };
 
+export default function SalesPage() {
+  const router = useRouter();
 
+  const [companyId, setCompanyId] = useState("");
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
 
-export default function SalesPage(){
+  const [customerId, setCustomerId] = useState("");
+  const [productId, setProductId] = useState("");
+  const [quantity, setQuantity] = useState("1");
 
-const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    loadPage();
+  }, []);
 
-const [companyId,setCompanyId] = useState("");
+  const selectedProduct = products.find(
+    (product) => product.id === productId
+  );
 
-const [customers,setCustomers] = useState<Customer[]>([]);
-const [products,setProducts] = useState<Product[]>([]);
-const [sales,setSales] = useState<Sale[]>([]);
+  const saleQuantity = Number(quantity || 0);
+  const unitPrice = Number(selectedProduct?.sale_price || 0);
+  const totalAmount = saleQuantity * unitPrice;
 
+  async function loadPage() {
+    setLoading(true);
 
-const [customerId,setCustomerId] = useState("");
-const [productId,setProductId] = useState("");
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-const [quantity,setQuantity] = useState("1");
+    if (userError || !user) {
+      router.replace("/");
+      return;
+    }
 
+    const { data: membership, error: membershipError } =
+      await supabase
+        .from("company_members")
+        .select("company_id")
+        .eq("user_id", user.id)
+        .limit(1)
+        .maybeSingle();
 
-const [loading,setLoading] = useState(true);
-const [saving,setSaving] = useState(false);
+    if (membershipError) {
+      alert(membershipError.message);
+      setLoading(false);
+      return;
+    }
 
+    if (!membership?.company_id) {
+      alert("Company membership nahi mili.");
+      router.replace("/dashboard");
+      return;
+    }
 
+    const currentCompanyId = membership.company_id;
 
-useEffect(()=>{
+    setCompanyId(currentCompanyId);
 
-loadPage();
+    await Promise.all([
+      loadCustomers(currentCompanyId),
+      loadProducts(currentCompanyId),
+      loadSales(currentCompanyId),
+    ]);
 
-},[]);
+    setLoading(false);
+  }
 
+  async function loadCustomers(currentCompanyId: string) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("id, name")
+      .eq("company_id", currentCompanyId)
+      .order("name", { ascending: true });
 
+    if (error) {
+      alert(error.message);
+      return;
+    }
 
-const selectedProduct =
-products.find(
-(product)=>product.id===productId
-);
+    setCustomers(data || []);
+  }
 
+  async function loadProducts(currentCompanyId: string) {
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        "id, name, sku, sale_price, stock_quantity"
+      )
+      .eq("company_id", currentCompanyId)
+      .order("name", { ascending: true });
 
+    if (error) {
+      alert(error.message);
+      return;
+    }
 
-const unitPrice =
-Number(selectedProduct?.sale_price || 0);
+    setProducts(data || []);
+  }
 
+  async function loadSales(currentCompanyId: string) {
+    const { data, error } = await supabase
+      .from("sales")
+      .select(
+        `
+        id,
+        invoice_number,
+        total_amount,
+        created_at,
+        customers(name)
+        `
+      )
+      .eq("company_id", currentCompanyId)
+      .order("created_at", { ascending: false });
 
+    if (error) {
+      alert(error.message);
+      return;
+    }
 
-const saleQuantity =
-Number(quantity || 0);
+    setSales((data as unknown as Sale[]) || []);
+  }
 
+  function createInvoiceNumber() {
+    const timePart = Date.now()
+      .toString()
+      .slice(-8);
 
+    const randomPart = Math.random()
+      .toString(36)
+      .substring(2, 5)
+      .toUpperCase();
 
-const totalAmount =
-useMemo(()=>{
+    return "INV-" + timePart + randomPart;
+  }
 
-return unitPrice * saleQuantity;
+  async function createSale(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
 
-},[unitPrice,saleQuantity]);
+    if (!companyId) {
+      alert("Company load nahi hui.");
+      return;
+    }
 
+    if (!customerId) {
+      alert("Customer select karo.");
+      return;
+    }
 
+    if (!productId || !selectedProduct) {
+      alert("Product select karo.");
+      return;
+    }
 
+    if (
+      !Number.isFinite(saleQuantity) ||
+      saleQuantity < 1
+    ) {
+      alert("Quantity 1 ya us se zyada honi chahiye.");
+      return;
+    }
 
+    const availableStock = Number(
+      selectedProduct.stock_quantity || 0
+    );
 
-async function loadPage(){
+    if (saleQuantity > availableStock) {
+      alert(
+        "Available stock sirf " +
+          availableStock +
+          " hai."
+      );
+      return;
+    }
 
+    if (unitPrice <= 0) {
+      alert("Product ki sale price valid nahi hai.");
+      return;
+    }
 
-const {
-data:{user}
-}=await supabase.auth.getUser();
+    setSaving(true);
 
+    const invoiceNumber = createInvoiceNumber();
 
+    const { data: sale, error: saleError } =
+      await supabase
+        .from("sales")
+        .insert({
+          company_id: companyId,
+          customer_id: customerId,
+          invoice_number: invoiceNumber,
+          total_amount: totalAmount,
+        })
+        .select("id")
+        .single();
 
-if(!user){
+    if (saleError || !sale) {
+      setSaving(false);
+      alert(
+        saleError?.message ||
+          "Sale create nahi hui."
+      );
+      return;
+    }
 
-router.replace("/");
-return;
+    const { error: itemError } = await supabase
+      .from("sale_items")
+      .insert({
+        sale_id: sale.id,
+        product_id: productId,
+        quantity: saleQuantity,
+        unit_price: unitPrice,
+        total_price: totalAmount,
+      });
 
+    if (itemError) {
+      await supabase
+        .from("sales")
+        .delete()
+        .eq("id", sale.id);
+
+      setSaving(false);
+      alert(itemError.message);
+      return;
+    }
+
+    const newStock =
+      availableStock - saleQuantity;
+
+    const { error: stockError } = await supabase
+      .from("products")
+      .update({
+        stock_quantity: newStock,
+      })
+      .eq("id", productId)
+      .eq("company_id", companyId);
+
+    if (stockError) {
+      setSaving(false);
+      alert(stockError.message);
+      return;
+    }
+
+    setCustomerId("");
+    setProductId("");
+    setQuantity("1");
+
+    await Promise.all([
+      loadProducts(companyId),
+      loadSales(companyId),
+    ]);
+
+    setSaving(false);
+    alert("Sale successfully create ho gayi.");
+  }
+
+  if (loading) {
+    return (
+      <main style={loadingStyle}>
+        Loading sales...
+      </main>
+    );
+  }
+
+  return (
+    <main style={pageStyle}>
+      <div style={containerStyle}>
+        <button
+          type="button"
+          onClick={() =>
+            router.push("/dashboard")
+          }
+          style={backButtonStyle}
+        >
+          ← Back to Dashboard
+        </button>
+
+        <div style={headerRowStyle}>
+          <div>
+            <h1 style={pageTitleStyle}>Sales</h1>
+
+            <p style={pageDescriptionStyle}>
+              Sales create karo, stock update karo aur
+              invoices view karo.
+            </p>
+          </div>
+
+          <div style={salesCountStyle}>
+            <span style={countLabelStyle}>
+              Total Sales
+            </span>
+
+            <strong style={countNumberStyle}>
+              {sales.length}
+            </strong>
+          </div>
+        </div>
+
+        <div style={contentGridStyle}>
+          <form
+            onSubmit={createSale}
+            style={formCardStyle}
+          >
+            <div style={cardHeadingRowStyle}>
+              <div>
+                <h2 style={cardTitleStyle}>
+                  Create Sale
+                </h2>
+
+                <p style={cardSubtitleStyle}>
+                  Customer, product aur quantity select
+                  karo.
+                </p>
+              </div>
+            </div>
+
+            <label style={labelStyle}>
+              Customer
+            </label>
+
+            <select
+              value={customerId}
+              onChange={(event) =>
+                setCustomerId(event.target.value)
+              }
+              style={inputStyle}
+            >
+              <option value="">
+                Select customer
+              </option>
+
+              {customers.map((customer) => (
+                <option
+                  key={customer.id}
+                  value={customer.id}
+                >
+                  {customer.name}
+                </option>
+              ))}
+            </select>
+
+            <label style={labelStyle}>
+              Product
+            </label>
+
+            <select
+              value={productId}
+              onChange={(event) =>
+                setProductId(event.target.value)
+              }
+              style={inputStyle}
+            >
+              <option value="">
+                Select product
+              </option>
+
+              {products.map((product) => (
+                <option
+                  key={product.id}
+                  value={product.id}
+                >
+                  {product.name} — Stock:{" "}
+                  {Number(
+                    product.stock_quantity || 0
+                  )}
+                </option>
+              ))}
+            </select>
+
+            <label style={labelStyle}>
+              Quantity
+            </label>
+
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={quantity}
+              onChange={(event) =>
+                setQuantity(event.target.value)
+              }
+              style={inputStyle}
+            />
+
+            <div style={priceSummaryStyle}>
+              <div style={summaryItemStyle}>
+                <span style={summaryLabelStyle}>
+                  Unit Price
+                </span>
+
+                <strong style={summaryValueStyle}>
+                  Rs. {unitPrice.toFixed(2)}
+                </strong>
+              </div>
+
+              <div style={summaryDividerStyle} />
+
+              <div style={summaryItemStyle}>
+                <span style={summaryLabelStyle}>
+                  Total
+                </span>
+
+                <strong style={totalValueStyle}>
+                  Rs. {totalAmount.toFixed(2)}
+                </strong>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                ...createButtonStyle,
+                opacity: saving ? 0.65 : 1,
+                cursor: saving
+                  ? "not-allowed"
+                  : "pointer",
+              }}
+            >
+              {saving
+                ? "Creating Sale..."
+                : "Create Sale"}
+            </button>
+          </form>
+
+          <section style={salesCardStyle}>
+            <div style={tableCardHeaderStyle}>
+              <div>
+                <h2 style={cardTitleStyle}>
+                  Recent Sales
+                </h2>
+
+                <p style={cardSubtitleStyle}>
+                  Latest sales aur invoices.
+                </p>
+              </div>
+
+              <span style={recordBadgeStyle}>
+                {sales.length} Records
+              </span>
+            </div>
+
+            {sales.length === 0 ? (
+              <div style={emptyStateStyle}>
+                <div style={emptyIconStyle}>🧾</div>
+
+                <h3 style={emptyTitleStyle}>
+                  Abhi koi sale nahi hai
+                </h3>
+
+                <p style={emptyTextStyle}>
+                  Pehli sale create karne ke baad record
+                  yahan show hoga.
+                </p>
+              </div>
+            ) : (
+              <div style={tableWrapperStyle}>
+                <table style={tableStyle}>
+                  <thead>
+                    <tr>
+                      <th style={firstHeaderStyle}>
+                        Date
+                      </th>
+
+                      <th style={tableHeaderStyle}>
+                        Customer
+                      </th>
+
+                      <th style={amountHeaderStyle}>
+                        Amount
+                      </th>
+
+                      <th style={tableHeaderStyle}>
+                        Invoice
+                      </th>
+
+                      <th style={actionHeaderStyle}>
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {sales.map((sale) => (
+                      <tr key={sale.id}>
+                        <td style={firstCellStyle}>
+                          {new Date(
+                            sale.created_at
+                          ).toLocaleDateString()}
+                        </td>
+
+                        <td style={tableCellStyle}>
+                          <div style={customerCellStyle}>
+                            <span
+                              style={customerAvatarStyle}
+                            >
+                              {(
+                                sale.customers?.name ||
+                                "W"
+                              )
+                                .charAt(0)
+                                .toUpperCase()}
+                            </span>
+
+                            <span>
+                              {sale.customers?.name ||
+                                "Walk-in Customer"}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td style={amountCellStyle}>
+                          Rs.{" "}
+                          {Number(
+                            sale.total_amount || 0
+                          ).toFixed(2)}
+                        </td>
+
+                        <td style={tableCellStyle}>
+                          <span
+                            style={invoiceBadgeStyle}
+                          >
+                            {sale.invoice_number ||
+                              "No invoice"}
+                          </span>
+                        </td>
+
+                        <td style={actionCellStyle}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              router.push(
+                                "/invoices/" + sale.id
+                              )
+                            }
+                            style={invoiceButtonStyle}
+                          >
+                            View Invoice
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    </main>
+  );
 }
 
-
-
-const {data:membership,error}=await supabase
-
-.from("company_members")
-
-.select("company_id")
-
-.eq("user_id",user.id)
-
-.single();
-
-
-
-if(error){
-
-alert(error.message);
-return;
-
-}
-
-
-
-if(!membership){
-
-router.replace("/dashboard");
-return;
-
-}
-
-
-
-setCompanyId(
-membership.company_id
-);
-
-
-
-await Promise.all([
-
-loadCustomers(
-membership.company_id
-),
-
-loadProducts(
-membership.company_id
-),
-
-loadSales(
-membership.company_id
-)
-
-]);
-
-
-
-setLoading(false);
-
-
-}
-
-
-
-
-async function loadCustomers(id:string){
-
-
-const {data,error}=await supabase
-
-.from("customers")
-
-.select("id,name")
-
-.eq("company_id",id);
-
-
-
-if(error){
-
-alert(error.message);
-return;
-
-}
-
-
-
-setCustomers(data || []);
-
-
-}
-
-
-
-
-async function loadProducts(id:string){
-
-
-const {data,error}=await supabase
-
-.from("products")
-
-.select(
-"id,name,sale_price,stock_quantity"
-)
-
-.eq("company_id",id);
-
-
-
-if(error){
-
-alert(error.message);
-return;
-
-}
-
-
-
-setProducts(data || []);
-
-
-}
-
-
-
-
-async function loadSales(id:string){
-
-
-const {data,error}=await supabase
-
-.from("sales")
-
-.select(
-`
-id,
-total_amount,
-created_at,
-customers(name)
-`
-)
-
-.eq("company_id",id)
-
-.order(
-"created_at",
-{
-ascending:false
-}
-);
-
-
-
-if(error){
-
-alert(error.message);
-return;
-
-}
-
-
-
-setSales(
-(data as unknown as Sale[]) || []
-);
-
-
-}
-// ================= CREATE SALE =================
-
-
-async function handleCreateSale(
-event:FormEvent<HTMLFormElement>
-){
-
-event.preventDefault();
-
-
-
-if(!customerId){
-
-alert("Customer select karo");
-return;
-
-}
-
-
-
-if(!productId){
-
-alert("Product select karo");
-return;
-
-}
-
-
-
-if(!selectedProduct){
-
-alert("Product nahi mila");
-return;
-
-}
-
-
-
-const availableStock =
-Number(selectedProduct.stock_quantity || 0);
-
-
-
-if(saleQuantity > availableStock){
-
-alert(
-Stock sirf ${availableStock} available hai
-);
-
-return;
-
-}
-
-
-
-setSaving(true);
-
-
-
-const {data:sale,error:saleError}=await supabase
-
-.from("sales")
-
-.insert({
-
-company_id:companyId,
-
-customer_id:customerId,
-
-total_amount:totalAmount
-
-})
-
-.select("id")
-
-.single();
-
-
-
-if(saleError){
-
-setSaving(false);
-
-alert(saleError.message);
-
-return;
-
-}
-
-
-
-
-
-const {error:itemError}=await supabase
-
-.from("sale_items")
-
-.insert({
-
-sale_id:sale.id,
-
-product_id:productId,
-
-quantity:saleQuantity,
-
-unit_price:unitPrice,
-
-total_price:totalAmount
-
-});
-
-
-
-if(itemError){
-
-setSaving(false);
-
-alert(itemError.message);
-
-return;
-
-}
-
-
-
-
-
-const {error:stockError}=await supabase
-
-.from("products")
-
-.update({
-
-stock_quantity:
-availableStock - saleQuantity
-
-})
-
-.eq("id",productId)
-
-.eq("company_id",companyId);
-
-
-
-setSaving(false);
-
-
-
-if(stockError){
-
-alert(stockError.message);
-
-return;
-
-}
-
-
-
-
-setCustomerId("");
-
-setProductId("");
-
-setQuantity("1");
-
-
-
-await Promise.all([
-
-loadProducts(companyId),
-
-loadSales(companyId)
-
-]);
-
-
-
-alert("Sale successfully save ho gayi");
-
-
-}
-
-
-
-
-
-if(loading){
-
-return (
-
-<main style={loadingStyle}>
-
-Loading...
-
-</main>
-
-);
-
-}
-
-
-
-return (
-
-<main style={pageStyle}>
-
-
-<div style={containerStyle}>
-
-
-<button
-
-onClick={()=>router.push("/dashboard")}
-
-style={backStyle}
-
->
-
-← Back to Dashboard
-
-</button>
-
-
-
-<div style={headerStyle}>
-
-
-<div>
-
-<h1>
-
-Sales
-
-</h1>
-
-
-<p>
-
-Customer sale aur stock manage karo.
-
-</p>
-
-</div>
-
-
-
-<div style={countStyle}>
-
-Total Sales:
-<strong>
-{sales.length}
-</strong>
-
-</div>
-
-
-</div>
-
-
-
-
-
-<div style={gridStyle}>
-
-
-<form
-
-onSubmit={handleCreateSale}
-
-style={cardStyle}
-
->
-
-
-<h2>
-
-Create Sale
-
-</h2>
-
-
-
-
-<select
-
-value={customerId}
-
-onChange={
-(e)=>setCustomerId(e.target.value)
-}
-
-style={inputStyle}
-
->
-
-
-<option value="">
-
-Select Customer
-
-</option>
-
-
-{
-
-customers.map(c=>(
-
-<option
-
-key={c.id}
-
-value={c.id}
-
->
-
-{c.name}
-
-</option>
-
-))
-
-}
-
-
-</select>
-
-
-
-
-
-<select
-
-value={productId}
-
-onChange={
-(e)=>setProductId(e.target.value)
-}
-
-style={inputStyle}
-
->
-
-
-<option value="">
-
-Select Product
-
-</option>
-
-
-{
-
-products.map(p=>(
-
-<option
-
-key={p.id}
-
-value={p.id}
-
->
-
-{p.name} -
-Stock {p.stock_quantity}
-
-</option>
-
-
-))
-
-}
-
-
-</select>
-
-
-
-
-
-<input
-
-type="number"
-
-value={quantity}
-
-min="1"
-
-onChange={
-(e)=>setQuantity(e.target.value)
-}
-
-style={inputStyle}
-
-placeholder="Quantity"
-
-/>
-
-
-
-
-
-<div style={totalBox}>
-
-
-
-<div>
-
-Unit Price
-
-<h3>
-
-{unitPrice}
-
-</h3>
-
-</div>
-
-
-
-<div>
-
-Total
-
-<h3>
-
-{totalAmount}
-
-</h3>
-
-</div>
-
-
-
-</div>
-
-
-
-
-<button
-
-disabled={saving}
-
-style={buttonStyle}
-
->
-
-{
-
-saving ?
-
-"Saving..." :
-
-"Create Sale"
-
-}
-
-
-</button>
-
-
-
-</form>
-
-
-
-
-
-<section style={cardStyle}>
-
-
-<h2>
-
-Recent Sales
-
-</h2>
-
-
-
-
-<table style={tableStyle}>
-
-
-<thead>
-
-<tr>
-
-<th>Date</th>
-
-<th>Customer</th>
-
-<th>Amount</th>
-
-<th>Invoice</th>
-
-</tr>
-
-</thead>
-
-
-
-
-<tbody>
-
-
-{
-
-sales.map(s=>(
-
-<tr key={s.id}>
-
-
-<td>
-
-{
-new Date(
-s.created_at
-).toLocaleDateString()
-}
-
-</td>
-
-
-<td>
-
-{s.customers?.name}
-
-</td>
-
-
-
-<td>
-
-{s.total_amount}
-
-</td>
-
-
-<td>
-
-<button
-
-style={smallBtn}
-
-onClick={()=>router.push("/invoices/"+s.id)}
-
->
-
-View
-
-</button>
-
-</td>
-
-
-</tr>
-
-
-))
-
-
-}
-
-
-</tbody>
-
-
-</table>
-
-
-
-</section>
-
-
-</div>
-
-
-</div>
-
-
-</main>
-
-);
-
-}
-const pageStyle:React.CSSProperties={
-
-minHeight:"100vh",
-background:"#f5f7fb",
-padding:"32px",
-fontFamily:"Arial, Helvetica, sans-serif",
-color:"#172033"
-
+const pageStyle: CSSProperties = {
+  minHeight: "100vh",
+  backgroundColor: "#f4f7fb",
+  padding: "32px",
+  fontFamily:
+    "Arial, Helvetica, sans-serif",
+  color: "#172033",
 };
 
-
-
-const loadingStyle:React.CSSProperties={
-
-minHeight:"100vh",
-display:"flex",
-alignItems:"center",
-justifyContent:"center"
-
+const loadingStyle: CSSProperties = {
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#f4f7fb",
+  fontFamily: "Arial, sans-serif",
+  color: "#475467",
 };
 
-
-
-const containerStyle:React.CSSProperties={
-
-maxWidth:"1200px",
-margin:"0 auto"
-
+const containerStyle: CSSProperties = {
+  maxWidth: "1280px",
+  margin: "0 auto",
 };
 
-
-
-const backStyle:React.CSSProperties={
-
-border:"none",
-background:"transparent",
-color:"#2563eb",
-cursor:"pointer",
-marginBottom:"20px",
-fontSize:"15px"
-
+const backButtonStyle: CSSProperties = {
+  border: "none",
+  backgroundColor: "transparent",
+  color: "#2563eb",
+  padding: "0",
+  marginBottom: "22px",
+  cursor: "pointer",
+  fontSize: "14px",
+  fontWeight: "600",
 };
 
-
-
-const headerStyle:React.CSSProperties={
-
-display:"flex",
-justifyContent:"space-between",
-alignItems:"center",
-marginBottom:"25px"
-
+const headerRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "20px",
+  marginBottom: "26px",
 };
 
-
-
-const countStyle:React.CSSProperties={
-
-background:"#fff",
-padding:"15px 20px",
-borderRadius:"12px",
-border:"1px solid #eaecf0"
-
+const pageTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: "30px",
+  lineHeight: "38px",
+  color: "#101828",
 };
 
-
-
-const gridStyle:React.CSSProperties={
-
-display:"grid",
-gridTemplateColumns:"380px 1fr",
-gap:"25px"
-
+const pageDescriptionStyle: CSSProperties = {
+  margin: "7px 0 0",
+  color: "#667085",
+  fontSize: "15px",
 };
 
-
-
-const cardStyle:React.CSSProperties={
-
-background:"#fff",
-padding:"25px",
-borderRadius:"16px",
-border:"1px solid #eaecf0",
-boxShadow:"0 5px 15px rgba(0,0,0,0.06)"
-
+const salesCountStyle: CSSProperties = {
+  minWidth: "135px",
+  backgroundColor: "#ffffff",
+  border: "1px solid #eaecf0",
+  borderRadius: "14px",
+  padding: "14px 18px",
+  boxShadow:
+    "0 4px 14px rgba(16,24,40,0.04)",
 };
 
-
-
-const inputStyle:React.CSSProperties={
-
-width:"100%",
-padding:"12px",
-marginBottom:"15px",
-border:"1px solid #d0d5dd",
-borderRadius:"8px",
-fontSize:"15px",
-boxSizing:"border-box"
-
+const countLabelStyle: CSSProperties = {
+  display: "block",
+  color: "#667085",
+  fontSize: "12px",
+  marginBottom: "5px",
 };
 
-
-
-const totalBox:React.CSSProperties={
-
-display:"flex",
-justifyContent:"space-between",
-background:"#f8fafc",
-border:"1px solid #eaecf0",
-padding:"15px",
-borderRadius:"10px",
-marginBottom:"15px"
-
+const countNumberStyle: CSSProperties = {
+  fontSize: "24px",
+  color: "#101828",
 };
 
-
-
-const buttonStyle:React.CSSProperties={
-
-width:"100%",
-padding:"13px",
-background:"#2563eb",
-color:"#fff",
-border:"none",
-borderRadius:"8px",
-cursor:"pointer",
-fontSize:"16px"
-
+const contentGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(300px, 380px) minmax(0, 1fr)",
+  gap: "24px",
+  alignItems: "start",
 };
 
-
-
-const tableStyle:React.CSSProperties={
-
-width:"100%",
-borderCollapse:"separate",
-borderSpacing:"0 10px"
-
+const formCardStyle: CSSProperties = {
+  backgroundColor: "#ffffff",
+  padding: "24px",
+  borderRadius: "16px",
+  border: "1px solid #eaecf0",
+  boxShadow:
+    "0 8px 24px rgba(16,24,40,0.06)",
 };
 
-
-
-const th:React.CSSProperties={
-
-background:"#f1f5f9",
-padding:"14px",
-textAlign:"left",
-fontSize:"14px",
-color:"#475467"
-
+const salesCardStyle: CSSProperties = {
+  backgroundColor: "#ffffff",
+  borderRadius: "16px",
+  border: "1px solid #eaecf0",
+  boxShadow:
+    "0 8px 24px rgba(16,24,40,0.06)",
+  overflow: "hidden",
 };
 
-
-
-const td:React.CSSProperties={
-
-padding:"14px",
-background:"#fff",
-borderTop:"1px solid #eee",
-borderBottom:"1px solid #eee"
-
+const cardHeadingRowStyle: CSSProperties = {
+  marginBottom: "22px",
 };
 
+const cardTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#101828",
+  fontSize: "19px",
+};
 
+const cardSubtitleStyle: CSSProperties = {
+  margin: "6px 0 0",
+  color: "#667085",
+  fontSize: "13px",
+};
 
-const smallBtn:React.CSSProperties={
+const labelStyle: CSSProperties = {
+  display: "block",
+  marginBottom: "7px",
+  color: "#344054",
+  fontSize: "13px",
+  fontWeight: "600",
+};
 
-background:"#2563eb",
-color:"#fff",
-border:"none",
-padding:"7px 12px",
-borderRadius:"6px",
-cursor:"pointer"
+const inputStyle: CSSProperties = {
+  width: "100%",
+  height: "44px",
+  padding: "0 12px",
+  marginBottom: "16px",
+  border: "1px solid #d0d5dd",
+  borderRadius: "9px",
+  boxSizing: "border-box",
+  backgroundColor: "#ffffff",
+  color: "#101828",
+  fontSize: "14px",
+  outline: "none",
+};
 
+const priceSummaryStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr auto 1fr",
+  alignItems: "center",
+  gap: "14px",
+  padding: "16px",
+  marginTop: "2px",
+  marginBottom: "18px",
+  backgroundColor: "#f8fafc",
+  border: "1px solid #eaecf0",
+  borderRadius: "11px",
+};
+
+const summaryItemStyle: CSSProperties = {
+  minWidth: 0,
+};
+
+const summaryLabelStyle: CSSProperties = {
+  display: "block",
+  color: "#667085",
+  fontSize: "12px",
+  marginBottom: "5px",
+};
+
+const summaryValueStyle: CSSProperties = {
+  color: "#344054",
+  fontSize: "15px",
+};
+
+const totalValueStyle: CSSProperties = {
+  color: "#2563eb",
+  fontSize: "17px",
+};
+
+const summaryDividerStyle: CSSProperties = {
+  width: "1px",
+  height: "38px",
+  backgroundColor: "#e4e7ec",
+};
+
+const createButtonStyle: CSSProperties = {
+  width: "100%",
+  minHeight: "44px",
+  border: "none",
+  borderRadius: "9px",
+  backgroundColor: "#2563eb",
+  color: "#ffffff",
+  fontSize: "15px",
+  fontWeight: "700",
+};
+
+const tableCardHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "16px",
+  padding: "22px 24px",
+  borderBottom: "1px solid #eaecf0",
+};
+
+const recordBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "6px 10px",
+  backgroundColor: "#eff6ff",
+  color: "#1d4ed8",
+  borderRadius: "999px",
+  fontSize: "12px",
+  fontWeight: "700",
+};
+
+const tableWrapperStyle: CSSProperties = {
+  width: "100%",
+  overflowX: "auto",
+};
+
+const tableStyle: CSSProperties = {
+  width: "100%",
+  minWidth: "780px",
+  borderCollapse: "separate",
+  borderSpacing: 0,
+};
+
+const tableHeaderStyle: CSSProperties = {
+  padding: "13px 16px",
+  backgroundColor: "#f8fafc",
+  borderBottom: "1px solid #eaecf0",
+  color: "#475467",
+  textAlign: "left",
+  fontSize: "12px",
+  fontWeight: "700",
+  textTransform: "uppercase",
+  letterSpacing: "0.03em",
+};
+
+const firstHeaderStyle: CSSProperties = {
+  ...tableHeaderStyle,
+  paddingLeft: "24px",
+};
+
+const amountHeaderStyle: CSSProperties = {
+  ...tableHeaderStyle,
+  textAlign: "right",
+};
+
+const actionHeaderStyle: CSSProperties = {
+  ...tableHeaderStyle,
+  textAlign: "center",
+  paddingRight: "24px",
+};
+
+const tableCellStyle: CSSProperties = {
+  padding: "16px",
+  borderBottom: "1px solid #f2f4f7",
+  color: "#475467",
+  fontSize: "14px",
+  verticalAlign: "middle",
+};
+
+const firstCellStyle: CSSProperties = {
+  ...tableCellStyle,
+  paddingLeft: "24px",
+  color: "#344054",
+  whiteSpace: "nowrap",
+};
+
+const amountCellStyle: CSSProperties = {
+  ...tableCellStyle,
+  textAlign: "right",
+  color: "#101828",
+  fontWeight: "700",
+  whiteSpace: "nowrap",
+};
+
+const actionCellStyle: CSSProperties = {
+  ...tableCellStyle,
+  textAlign: "center",
+  paddingRight: "24px",
+};
+
+const customerCellStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "10px",
+  color: "#344054",
+  fontWeight: "600",
+};
+
+const customerAvatarStyle: CSSProperties = {
+  width: "32px",
+  height: "32px",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+  borderRadius: "50%",
+  backgroundColor: "#eff6ff",
+  color: "#2563eb",
+  fontSize: "13px",
+  fontWeight: "700",
+};
+
+const invoiceBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  padding: "6px 9px",
+  borderRadius: "7px",
+  backgroundColor: "#f2f4f7",
+  color: "#344054",
+  fontSize: "12px",
+  fontWeight: "700",
+  whiteSpace: "nowrap",
+};
+
+const invoiceButtonStyle: CSSProperties = {
+  border: "1px solid #bfdbfe",
+  borderRadius: "8px",
+  padding: "8px 12px",
+  backgroundColor: "#eff6ff",
+  color: "#1d4ed8",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: "700",
+  whiteSpace: "nowrap",
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: "65px 24px",
+  textAlign: "center",
+};
+
+const emptyIconStyle: CSSProperties = {
+  fontSize: "34px",
+  marginBottom: "12px",
+};
+
+const emptyTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#344054",
+  fontSize: "16px",
+};
+
+const emptyTextStyle: CSSProperties = {
+  maxWidth: "360px",
+  margin: "8px auto 0",
+  color: "#667085",
+  fontSize: "13px",
+  lineHeight: 1.6,
 };
