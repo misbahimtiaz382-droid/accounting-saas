@@ -22,11 +22,25 @@ type Product = {
   stock_quantity: number | null;
 };
 
+type CartItem = {
+  product_id: string;
+  name: string;
+  sku: string | null;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  available_stock: number;
+};
+
 type Sale = {
   id: string;
   invoice_number: string | null;
   total_amount: number | null;
+  paid_amount: number | null;
+  remaining_balance: number | null;
+  payment_method: string | null;
   payment_status: string | null;
+  due_date: string | null;
   created_at: string;
   customers: {
     name: string;
@@ -37,6 +51,7 @@ export default function SalesPage() {
   const router = useRouter();
 
   const [companyId, setCompanyId] = useState("");
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -45,9 +60,13 @@ export default function SalesPage() {
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState("1");
 
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+
   const [discountAmount, setDiscountAmount] = useState("0");
   const [taxAmount, setTaxAmount] = useState("0");
-  const [paymentStatus, setPaymentStatus] = useState("unpaid");
+  const [paidAmount, setPaidAmount] = useState("0");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [dueDate, setDueDate] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -60,17 +79,44 @@ export default function SalesPage() {
     (product) => product.id === productId
   );
 
-  const saleQuantity = Number(quantity || 0);
-  const unitPrice = Number(selectedProduct?.sale_price || 0);
+  const selectedQuantity = Number(quantity || 0);
 
-  const subtotal = saleQuantity * unitPrice;
-  const discount = Math.max(0, Number(discountAmount || 0));
-  const tax = Math.max(0, Number(taxAmount || 0));
+  const cartSubtotal = cartItems.reduce(
+    (sum, item) => sum + item.total_price,
+    0
+  );
+
+  const discount = Math.max(
+    0,
+    Number(discountAmount || 0)
+  );
+
+  const tax = Math.max(
+    0,
+    Number(taxAmount || 0)
+  );
 
   const grandTotal = Math.max(
     0,
-    subtotal - discount + tax
+    cartSubtotal - discount + tax
   );
+
+  const paid = Math.max(
+    0,
+    Number(paidAmount || 0)
+  );
+
+  const remainingBalance = Math.max(
+    0,
+    grandTotal - paid
+  );
+
+  const automaticPaymentStatus =
+    grandTotal <= 0 || paid <= 0
+      ? "unpaid"
+      : paid >= grandTotal
+        ? "paid"
+        : "partial";
 
   async function loadPage() {
     setLoading(true);
@@ -85,13 +131,15 @@ export default function SalesPage() {
       return;
     }
 
-    const { data: membership, error: membershipError } =
-      await supabase
-        .from("company_members")
-        .select("company_id")
-        .eq("user_id", user.id)
-        .limit(1)
-        .maybeSingle();
+    const {
+      data: membership,
+      error: membershipError,
+    } = await supabase
+      .from("company_members")
+      .select("company_id")
+      .eq("user_id", user.id)
+      .limit(1)
+      .maybeSingle();
 
     if (membershipError) {
       alert(membershipError.message);
@@ -118,7 +166,9 @@ export default function SalesPage() {
     setLoading(false);
   }
 
-  async function loadCustomers(currentCompanyId: string) {
+  async function loadCustomers(
+    currentCompanyId: string
+  ) {
     const { data, error } = await supabase
       .from("customers")
       .select("id, name")
@@ -133,7 +183,9 @@ export default function SalesPage() {
     setCustomers(data || []);
   }
 
-  async function loadProducts(currentCompanyId: string) {
+  async function loadProducts(
+    currentCompanyId: string
+  ) {
     const { data, error } = await supabase
       .from("products")
       .select(
@@ -150,12 +202,23 @@ export default function SalesPage() {
     setProducts(data || []);
   }
 
-  async function loadSales(currentCompanyId: string) {
+  async function loadSales(
+    currentCompanyId: string
+  ) {
     const { data, error } = await supabase
       .from("sales")
-      .select(
-        "id, invoice_number, total_amount, payment_status, created_at, customers(name)"
-      )
+      .select(`
+        id,
+        invoice_number,
+        total_amount,
+        paid_amount,
+        remaining_balance,
+        payment_method,
+        payment_status,
+        due_date,
+        created_at,
+        customers(name)
+      `)
       .eq("company_id", currentCompanyId)
       .order("created_at", { ascending: false });
 
@@ -164,7 +227,9 @@ export default function SalesPage() {
       return;
     }
 
-    setSales((data as unknown as Sale[]) || []);
+    setSales(
+      (data as unknown as Sale[]) || []
+    );
   }
 
   function createInvoiceNumber() {
@@ -178,6 +243,143 @@ export default function SalesPage() {
       .toUpperCase();
 
     return "INV-" + timePart + randomPart;
+  }
+  function addItemToCart() {
+    if (!selectedProduct) {
+      alert("Product select karo.");
+      return;
+    }
+
+    if (
+      !Number.isFinite(selectedQuantity) ||
+      selectedQuantity < 1
+    ) {
+      alert("Quantity 1 ya us se zyada honi chahiye.");
+      return;
+    }
+
+    const availableStock = Number(
+      selectedProduct.stock_quantity || 0
+    );
+
+    const existingItem = cartItems.find(
+      (item) =>
+        item.product_id === selectedProduct.id
+    );
+
+    const existingQuantity =
+      existingItem?.quantity || 0;
+
+    const finalQuantity =
+      existingQuantity + selectedQuantity;
+
+    if (finalQuantity > availableStock) {
+      alert(
+        "Available stock sirf " +
+          availableStock +
+          " hai."
+      );
+      return;
+    }
+
+    const unitPrice = Number(
+      selectedProduct.sale_price || 0
+    );
+
+    if (unitPrice <= 0) {
+      alert("Product ki sale price valid nahi hai.");
+      return;
+    }
+
+    if (existingItem) {
+      setCartItems((currentItems) =>
+        currentItems.map((item) =>
+          item.product_id === selectedProduct.id
+            ? {
+                ...item,
+                quantity: finalQuantity,
+                total_price:
+                  finalQuantity * unitPrice,
+              }
+            : item
+        )
+      );
+    } else {
+      const newItem: CartItem = {
+        product_id: selectedProduct.id,
+        name: selectedProduct.name,
+        sku: selectedProduct.sku,
+        quantity: selectedQuantity,
+        unit_price: unitPrice,
+        total_price:
+          selectedQuantity * unitPrice,
+        available_stock: availableStock,
+      };
+
+      setCartItems((currentItems) => [
+        ...currentItems,
+        newItem,
+      ]);
+    }
+
+    setProductId("");
+    setQuantity("1");
+  }
+
+  function removeCartItem(
+    productIdToRemove: string
+  ) {
+    setCartItems((currentItems) =>
+      currentItems.filter(
+        (item) =>
+          item.product_id !== productIdToRemove
+      )
+    );
+  }
+
+  function updateCartQuantity(
+    productIdToUpdate: string,
+    newQuantityValue: string
+  ) {
+    const newQuantity = Number(
+      newQuantityValue || 0
+    );
+
+    setCartItems((currentItems) =>
+      currentItems.map((item) => {
+        if (
+          item.product_id !== productIdToUpdate
+        ) {
+          return item;
+        }
+
+        if (
+          !Number.isFinite(newQuantity) ||
+          newQuantity < 1
+        ) {
+          return item;
+        }
+
+        if (
+          newQuantity > item.available_stock
+        ) {
+          alert(
+            "Available stock sirf " +
+              item.available_stock +
+              " hai."
+          );
+
+          return item;
+        }
+
+        return {
+          ...item,
+          quantity: newQuantity,
+          total_price:
+            newQuantity * item.unit_price,
+        };
+      })
+    );
   }
 
   async function createSale(
@@ -195,60 +397,65 @@ export default function SalesPage() {
       return;
     }
 
-    if (!productId || !selectedProduct) {
-      alert("Product select karo.");
-      return;
-    }
-
-    if (
-      !Number.isFinite(saleQuantity) ||
-      saleQuantity < 1
-    ) {
-      alert("Quantity 1 ya us se zyada honi chahiye.");
-      return;
-    }
-
-    const availableStock = Number(
-      selectedProduct.stock_quantity || 0
-    );
-
-    if (saleQuantity > availableStock) {
+    if (cartItems.length === 0) {
       alert(
-        "Available stock sirf " +
-          availableStock +
-          " hai."
+        "Kam az kam ek product cart me add karo."
       );
       return;
     }
 
-    if (unitPrice <= 0) {
-      alert("Product ki sale price valid nahi hai.");
+    if (discount > cartSubtotal) {
+      alert(
+        "Discount subtotal se zyada nahi ho sakta."
+      );
       return;
     }
 
-    if (discount > subtotal) {
-      alert("Discount subtotal se zyada nahi ho sakta.");
+    if (paid > grandTotal) {
+      alert(
+        "Paid amount grand total se zyada nahi ho sakta."
+      );
+      return;
+    }
+
+    if (
+      automaticPaymentStatus !== "paid" &&
+      !dueDate
+    ) {
+      alert(
+        "Unpaid ya partial sale ke liye due date select karo."
+      );
       return;
     }
 
     setSaving(true);
 
-    const invoiceNumber = createInvoiceNumber();
+    const invoiceNumber =
+      createInvoiceNumber();
 
-    const { data: sale, error: saleError } =
-      await supabase
-        .from("sales")
-        .insert({
-          company_id: companyId,
-          customer_id: customerId,
-          invoice_number: invoiceNumber,
-          total_amount: grandTotal,
-          discount_amount: discount,
-          tax_amount: tax,
-          payment_status: paymentStatus,
-        })
-        .select("id")
-        .single();
+    const {
+      data: sale,
+      error: saleError,
+    } = await supabase
+      .from("sales")
+      .insert({
+        company_id: companyId,
+        customer_id: customerId,
+        invoice_number: invoiceNumber,
+        total_amount: grandTotal,
+        discount_amount: discount,
+        tax_amount: tax,
+        paid_amount: paid,
+        remaining_balance: remainingBalance,
+        payment_method: paymentMethod,
+        payment_status: automaticPaymentStatus,
+        due_date:
+          automaticPaymentStatus === "paid"
+            ? null
+            : dueDate || null,
+      })
+      .select("id")
+      .single();
 
     if (saleError || !sale) {
       setSaving(false);
@@ -261,50 +468,67 @@ export default function SalesPage() {
       return;
     }
 
-    const { error: itemError } = await supabase
-      .from("sale_items")
-      .insert({
+    const saleItemsPayload = cartItems.map(
+      (item) => ({
         sale_id: sale.id,
-        product_id: productId,
-        quantity: saleQuantity,
-        unit_price: unitPrice,
-        total_price: subtotal,
-      });
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        total_price: item.total_price,
+      })
+    );
 
-    if (itemError) {
+    const { error: itemsError } =
+      await supabase
+        .from("sale_items")
+        .insert(saleItemsPayload);
+
+    if (itemsError) {
       await supabase
         .from("sales")
         .delete()
         .eq("id", sale.id);
 
       setSaving(false);
-      alert(itemError.message);
+      alert(itemsError.message);
       return;
     }
 
-    const newStock =
-      availableStock - saleQuantity;
+    for (const item of cartItems) {
+      const newStock =
+        item.available_stock -
+        item.quantity;
 
-    const { error: stockError } = await supabase
-      .from("products")
-      .update({
-        stock_quantity: newStock,
-      })
-      .eq("id", productId)
-      .eq("company_id", companyId);
+      const { error: stockError } =
+        await supabase
+          .from("products")
+          .update({
+            stock_quantity: newStock,
+          })
+          .eq("id", item.product_id)
+          .eq("company_id", companyId);
 
-    if (stockError) {
-      setSaving(false);
-      alert(stockError.message);
-      return;
+      if (stockError) {
+        setSaving(false);
+
+        alert(
+          "Stock update error: " +
+            stockError.message
+        );
+
+        return;
+      }
     }
 
     setCustomerId("");
     setProductId("");
     setQuantity("1");
+    setCartItems([]);
     setDiscountAmount("0");
     setTaxAmount("0");
-    setPaymentStatus("unpaid");
+    setPaidAmount("0");
+    setPaymentMethod("cash");
+    setDueDate("");
 
     await Promise.all([
       loadProducts(companyId),
@@ -313,22 +537,14 @@ export default function SalesPage() {
 
     setSaving(false);
 
-    alert("Sale successfully create ho gayi.");
+    alert(
+      "Sale aur payment details successfully save ho gayi."
+    );
   }
 
-  function getStatusStyle(status: string | null) {
-    if (status === "paid") {
-      return paidStatusStyle;
-    }
-
-    if (status === "partial") {
-      return partialStatusStyle;
-    }
-
-    return unpaidStatusStyle;
-  }
-
-  function getStatusText(status: string | null) {
+  function getStatusText(
+    status: string | null
+  ) {
     if (status === "paid") {
       return "Paid";
     }
@@ -340,6 +556,36 @@ export default function SalesPage() {
     return "Unpaid";
   }
 
+  function getStatusStyle(
+    status: string | null
+  ) {
+    if (status === "paid") {
+      return paidStatusStyle;
+    }
+
+    if (status === "partial") {
+      return partialStatusStyle;
+    }
+
+    return unpaidStatusStyle;
+  }
+
+  function getPaymentMethodText(
+    method: string | null
+  ) {
+    const methods: Record<string, string> = {
+      cash: "Cash",
+      bank_transfer: "Bank Transfer",
+      card: "Card",
+      jazzcash: "JazzCash",
+      easypaisa: "EasyPaisa",
+      cheque: "Cheque",
+      other: "Other",
+    };
+
+    return methods[method || ""] || "-";
+  }
+
   if (loading) {
     return (
       <main style={loadingStyle}>
@@ -347,8 +593,7 @@ export default function SalesPage() {
       </main>
     );
   }
-
-  return (
+return (
     <main style={pageStyle}>
       <div style={containerStyle}>
         <button
@@ -364,8 +609,7 @@ export default function SalesPage() {
             <h1 style={pageTitleStyle}>Sales</h1>
 
             <p style={pageDescriptionStyle}>
-              Sales create karo, stock update karo aur
-              invoices view karo.
+              Multiple products, payments aur remaining balance manage karo.
             </p>
           </div>
 
@@ -380,19 +624,18 @@ export default function SalesPage() {
           </div>
         </div>
 
-        <div style={contentGridStyle}>
-          <form
-            onSubmit={createSale}
-            style={formCardStyle}
-          >
-            <div style={cardHeadingRowStyle}>
-              <h2 style={cardTitleStyle}>
+        <form
+          onSubmit={createSale}
+          style={saleWorkspaceStyle}
+        >
+          <section style={leftPanelStyle}>
+            <div style={sectionHeaderStyle}>
+              <h2 style={sectionTitleStyle}>
                 Create Sale
               </h2>
 
-              <p style={cardSubtitleStyle}>
-                Customer, product aur quantity select
-                karo.
+              <p style={sectionDescriptionStyle}>
+                Customer, products aur payment details enter karo.
               </p>
             </div>
 
@@ -421,48 +664,91 @@ export default function SalesPage() {
               ))}
             </select>
 
-            <label style={labelStyle}>
-              Product
-            </label>
+            <div style={productPickerStyle}>
+              <div style={productFieldStyle}>
+                <label style={labelStyle}>
+                  Product
+                </label>
 
-            <select
-              value={productId}
-              onChange={(event) =>
-                setProductId(event.target.value)
-              }
-              style={inputStyle}
-            >
-              <option value="">
-                Select product
-              </option>
-
-              {products.map((product) => (
-                <option
-                  key={product.id}
-                  value={product.id}
+                <select
+                  value={productId}
+                  onChange={(event) =>
+                    setProductId(event.target.value)
+                  }
+                  style={inputStyle}
                 >
-                  {product.name} — Stock:{" "}
-                  {Number(
-                    product.stock_quantity || 0
-                  )}
-                </option>
-              ))}
-            </select>
+                  <option value="">
+                    Select product
+                  </option>
 
-            <label style={labelStyle}>
-              Quantity
-            </label>
+                  {products.map((product) => (
+                    <option
+                      key={product.id}
+                      value={product.id}
+                    >
+                      {product.name} — Stock:{" "}
+                      {Number(
+                        product.stock_quantity || 0
+                      )}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={quantity}
-              onChange={(event) =>
-                setQuantity(event.target.value)
-              }
-              style={inputStyle}
-            />
+              <div style={quantityFieldStyle}>
+                <label style={labelStyle}>
+                  Quantity
+                </label>
+
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={quantity}
+                  onChange={(event) =>
+                    setQuantity(event.target.value)
+                  }
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+
+            {selectedProduct && (
+              <div style={selectedProductInfoStyle}>
+                <div>
+                  <span style={smallMutedTextStyle}>
+                    Selected Product
+                  </span>
+
+                  <strong style={selectedProductNameStyle}>
+                    {selectedProduct.name}
+                  </strong>
+                </div>
+
+                <div style={{ textAlign: "right" }}>
+                  <span style={smallMutedTextStyle}>
+                    Unit Price
+                  </span>
+
+                  <strong style={selectedProductPriceStyle}>
+                    Rs.{" "}
+                    {Number(
+                      selectedProduct.sale_price || 0
+                    ).toFixed(2)}
+                  </strong>
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={addItemToCart}
+              style={addItemButtonStyle}
+            >
+              + Add Item
+            </button>
+
+            <div style={dividerStyle} />
 
             <label style={labelStyle}>
               Discount Amount
@@ -495,63 +781,118 @@ export default function SalesPage() {
             />
 
             <label style={labelStyle}>
-              Payment Status
+              Paid Amount
+            </label>
+
+            <input
+              type="number"
+              min="0"
+              max={grandTotal}
+              step="0.01"
+              value={paidAmount}
+              onChange={(event) =>
+                setPaidAmount(event.target.value)
+              }
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>
+              Payment Method
             </label>
 
             <select
-              value={paymentStatus}
+              value={paymentMethod}
               onChange={(event) =>
-                setPaymentStatus(event.target.value)
+                setPaymentMethod(event.target.value)
               }
               style={inputStyle}
             >
-              <option value="unpaid">
-                Unpaid
+              <option value="cash">Cash</option>
+              <option value="bank_transfer">
+                Bank Transfer
               </option>
-
-              <option value="paid">
-                Paid
+              <option value="card">Card</option>
+              <option value="jazzcash">JazzCash</option>
+              <option value="easypaisa">
+                EasyPaisa
               </option>
-
-              <option value="partial">
-                Partial
-              </option>
+              <option value="cheque">Cheque</option>
+              <option value="other">Other</option>
             </select>
 
-            <div style={priceDetailsStyle}>
-              <div style={priceRowStyle}>
-                <span>Unit Price</span>
+            {automaticPaymentStatus !== "paid" && (
+              <>
+                <label style={labelStyle}>
+                  Due Date
+                </label>
 
-                <strong>
-                  Rs. {unitPrice.toFixed(2)}
-                </strong>
-              </div>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(event) =>
+                    setDueDate(event.target.value)
+                  }
+                  style={inputStyle}
+                />
+              </>
+            )}
 
-              <div style={priceRowStyle}>
+            <div style={statusPreviewStyle}>
+              <span>Automatic Status</span>
+
+              <strong
+                style={getStatusStyle(
+                  automaticPaymentStatus
+                )}
+              >
+                {getStatusText(
+                  automaticPaymentStatus
+                )}
+              </strong>
+            </div>
+
+            <div style={totalsBoxStyle}>
+              <div style={totalLineStyle}>
                 <span>Subtotal</span>
 
                 <strong>
-                  Rs. {subtotal.toFixed(2)}
+                  Rs. {cartSubtotal.toFixed(2)}
                 </strong>
               </div>
 
-              <div style={priceRowStyle}>
+              <div style={totalLineStyle}>
                 <span>Discount</span>
 
-                <strong>
+                <strong style={discountTextStyle}>
                   - Rs. {discount.toFixed(2)}
                 </strong>
               </div>
 
-              <div style={priceRowStyle}>
+              <div style={totalLineStyle}>
                 <span>Tax</span>
 
-                <strong>
+                <strong style={taxTextStyle}>
                   + Rs. {tax.toFixed(2)}
                 </strong>
               </div>
 
-              <div style={grandTotalRowStyle}>
+              <div style={totalLineStyle}>
+                <span>Paid</span>
+
+                <strong style={paidTextStyle}>
+                  Rs. {paid.toFixed(2)}
+                </strong>
+              </div>
+
+              <div style={totalLineStyle}>
+                <span>Remaining</span>
+
+                <strong style={remainingTextStyle}>
+                  Rs. {remainingBalance.toFixed(2)}
+                </strong>
+              </div>
+
+              <div style={grandTotalLineStyle}>
                 <span>Grand Total</span>
 
                 <strong>
@@ -562,150 +903,144 @@ export default function SalesPage() {
 
             <button
               type="submit"
-              disabled={saving}
+              disabled={
+                saving || cartItems.length === 0
+              }
               style={{
-                ...createButtonStyle,
-                opacity: saving ? 0.65 : 1,
-                cursor: saving
-                  ? "not-allowed"
-                  : "pointer",
+                ...createSaleButtonStyle,
+                opacity:
+                  saving || cartItems.length === 0
+                    ? 0.6
+                    : 1,
+                cursor:
+                  saving || cartItems.length === 0
+                    ? "not-allowed"
+                    : "pointer",
               }}
             >
               {saving
                 ? "Creating Sale..."
-                : "Create Sale"}
+                : "Create Sale & Invoice"}
             </button>
-          </form>
+          </section>
 
-          <section style={salesCardStyle}>
-            <div style={tableCardHeaderStyle}>
+          <section style={cartPanelStyle}>
+            <div style={cartHeaderStyle}>
               <div>
-                <h2 style={cardTitleStyle}>
-                  Recent Sales
+                <h2 style={sectionTitleStyle}>
+                  Invoice Items
                 </h2>
 
-                <p style={cardSubtitleStyle}>
-                  Latest sales aur invoices.
+                <p style={sectionDescriptionStyle}>
+                  Ek invoice me multiple products add kar sakte ho.
                 </p>
               </div>
 
-              <span style={recordBadgeStyle}>
-                {sales.length} Records
+              <span style={cartCountBadgeStyle}>
+                {cartItems.length} Items
               </span>
             </div>
 
-            {sales.length === 0 ? (
-              <div style={emptyStateStyle}>
-                <div style={emptyIconStyle}>🧾</div>
+            {cartItems.length === 0 ? (
+              <div style={emptyCartStyle}>
+                <div style={emptyCartIconStyle}>
+                  🛒
+                </div>
 
-                <h3 style={emptyTitleStyle}>
-                  Abhi koi sale nahi hai
+                <h3 style={emptyCartTitleStyle}>
+                  Cart empty hai
                 </h3>
 
-                <p style={emptyTextStyle}>
-                  Pehli sale create karne ke baad record
-                  yahan show hoga.
+                <p style={emptyCartTextStyle}>
+                  Product aur quantity select karke Add Item dabao.
                 </p>
               </div>
             ) : (
-              <div style={tableWrapperStyle}>
-                <table style={tableStyle}>
+              <div style={cartTableWrapperStyle}>
+                <table style={cartTableStyle}>
                   <thead>
                     <tr>
-                      <th style={firstHeaderStyle}>
-                        Date
+                      <th style={cartHeaderCellStyle}>
+                        Product
                       </th>
 
-                      <th style={tableHeaderStyle}>
-                        Customer
+                      <th style={cartHeaderCellStyle}>
+                        SKU
                       </th>
 
-                      <th style={amountHeaderStyle}>
-                        Amount
+                      <th style={cartNumberHeaderStyle}>
+                        Quantity
                       </th>
 
-                      <th style={tableHeaderStyle}>
-                        Status
+                      <th style={cartNumberHeaderStyle}>
+                        Rate
                       </th>
 
-                      <th style={tableHeaderStyle}>
-                        Invoice
+                      <th style={cartNumberHeaderStyle}>
+                        Total
                       </th>
 
-                      <th style={actionHeaderStyle}>
+                      <th style={cartActionHeaderStyle}>
                         Action
                       </th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {sales.map((sale) => (
-                      <tr key={sale.id}>
-                        <td style={firstCellStyle}>
-                          {new Date(
-                            sale.created_at
-                          ).toLocaleDateString()}
+                    {cartItems.map((item) => (
+                      <tr key={item.product_id}>
+                        <td style={cartCellStyle}>
+                          <strong style={productNameStyle}>
+                            {item.name}
+                          </strong>
+
+                          <span style={stockTextStyle}>
+                            Available:{" "}
+                            {item.available_stock}
+                          </span>
                         </td>
 
-                        <td style={tableCellStyle}>
-                          <div style={customerCellStyle}>
-                            <span
-                              style={customerAvatarStyle}
-                            >
-                              {(
-                                sale.customers?.name ||
-                                "W"
+                        <td style={cartCellStyle}>
+                          {item.sku || "-"}
+                        </td>
+
+                        <td style={cartNumberCellStyle}>
+                          <input
+                            type="number"
+                            min="1"
+                            max={item.available_stock}
+                            value={item.quantity}
+                            onChange={(event) =>
+                              updateCartQuantity(
+                                item.product_id,
+                                event.target.value
                               )
-                                .charAt(0)
-                                .toUpperCase()}
-                            </span>
-
-                            <span>
-                              {sale.customers?.name ||
-                                "Walk-in Customer"}
-                            </span>
-                          </div>
+                            }
+                            style={cartQuantityInputStyle}
+                          />
                         </td>
 
-                        <td style={amountCellStyle}>
+                        <td style={cartNumberCellStyle}>
                           Rs.{" "}
-                          {Number(
-                            sale.total_amount || 0
-                          ).toFixed(2)}
+                          {item.unit_price.toFixed(2)}
                         </td>
 
-                        <td style={tableCellStyle}>
-                          <span
-                            style={getStatusStyle(
-                              sale.payment_status
-                            )}
-                          >
-                            {getStatusText(
-                              sale.payment_status
-                            )}
-                          </span>
+                        <td style={cartTotalCellStyle}>
+                          Rs.{" "}
+                          {item.total_price.toFixed(2)}
                         </td>
 
-                        <td style={tableCellStyle}>
-                          <span
-                            style={invoiceBadgeStyle}
-                          >
-                            {sale.invoice_number ||
-                              "No invoice"}
-                          </span>
-                        </td>
-
-                        <td style={actionCellStyle}>
+                        <td style={cartActionCellStyle}>
                           <button
                             type="button"
                             onClick={() =>
-                              router.push(
-                                "/invoices/" + sale.id
+                              removeCartItem(
+                                item.product_id
                               )
                             }
-                            style={invoiceButtonStyle}
+                            style={removeButtonStyle}
                           >
-                            View Invoice
+                            Remove
                           </button>
                         </td>
                       </tr>
@@ -715,12 +1050,171 @@ export default function SalesPage() {
               </div>
             )}
           </section>
-        </div>
+        </form>
+
+        <section style={salesCardStyle}>
+          <div style={salesCardHeaderStyle}>
+            <div>
+              <h2 style={sectionTitleStyle}>
+                Recent Sales
+              </h2>
+
+              <p style={sectionDescriptionStyle}>
+                Payment, remaining balance aur invoices.
+              </p>
+            </div>
+
+            <span style={recordBadgeStyle}>
+              {sales.length} Records
+            </span>
+          </div>
+
+          {sales.length === 0 ? (
+            <div style={emptySalesStyle}>
+              Abhi koi sale nahi hai.
+            </div>
+          ) : (
+            <div style={salesTableWrapperStyle}>
+              <table style={salesTableStyle}>
+                <thead>
+                  <tr>
+                    <th style={firstSalesHeaderStyle}>
+                      Date
+                    </th>
+
+                    <th style={salesHeaderStyle}>
+                      Customer
+                    </th>
+
+                    <th style={salesAmountHeaderStyle}>
+                      Total
+                    </th>
+
+                    <th style={salesAmountHeaderStyle}>
+                      Paid
+                    </th>
+
+                    <th style={salesAmountHeaderStyle}>
+                      Remaining
+                    </th>
+
+                    <th style={salesHeaderStyle}>
+                      Method
+                    </th>
+
+                    <th style={salesHeaderStyle}>
+                      Status
+                    </th>
+
+                    <th style={salesHeaderStyle}>
+                      Invoice
+                    </th>
+
+                    <th style={salesActionHeaderStyle}>
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {sales.map((sale) => (
+                    <tr key={sale.id}>
+                      <td style={firstSalesCellStyle}>
+                        {new Date(
+                          sale.created_at
+                        ).toLocaleDateString()}
+                      </td>
+
+                      <td style={salesCellStyle}>
+                        <div style={customerCellStyle}>
+                          <span
+                            style={customerAvatarStyle}
+                          >
+                            {(
+                              sale.customers?.name ||
+                              "W"
+                            )
+                              .charAt(0)
+                              .toUpperCase()}
+                          </span>
+
+                          <span>
+                            {sale.customers?.name ||
+                              "Walk-in Customer"}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td style={salesAmountCellStyle}>
+                        Rs.{" "}
+                        {Number(
+                          sale.total_amount || 0
+                        ).toFixed(2)}
+                      </td>
+
+                      <td style={salesAmountCellStyle}>
+                        Rs.{" "}
+                        {Number(
+                          sale.paid_amount || 0
+                        ).toFixed(2)}
+                      </td>
+
+                      <td style={salesAmountCellStyle}>
+                        Rs.{" "}
+                        {Number(
+                          sale.remaining_balance || 0
+                        ).toFixed(2)}
+                      </td>
+
+                      <td style={salesCellStyle}>
+                        {getPaymentMethodText(
+                          sale.payment_method
+                        )}
+                      </td>
+
+                      <td style={salesCellStyle}>
+                        <span
+                          style={getStatusStyle(
+                            sale.payment_status
+                          )}
+                        >
+                          {getStatusText(
+                            sale.payment_status
+                          )}
+                        </span>
+                      </td>
+
+                      <td style={salesCellStyle}>
+                        <span style={invoiceBadgeStyle}>
+                          {sale.invoice_number ||
+                            "No invoice"}
+                        </span>
+                      </td>
+
+                      <td style={salesActionCellStyle}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            router.push(
+                              "/invoices/" + sale.id
+                            )
+                          }
+                          style={viewInvoiceButtonStyle}
+                        >
+                          View Invoice
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );
 }
-
 const pageStyle: CSSProperties = {
   minHeight: "100vh",
   backgroundColor: "#f4f7fb",
@@ -735,12 +1229,12 @@ const loadingStyle: CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   backgroundColor: "#f4f7fb",
-  fontFamily: "Arial, sans-serif",
   color: "#475467",
+  fontFamily: "Arial, sans-serif",
 };
 
 const containerStyle: CSSProperties = {
-  maxWidth: "1380px",
+  maxWidth: "1500px",
   margin: "0 auto",
 };
 
@@ -748,11 +1242,11 @@ const backButtonStyle: CSSProperties = {
   border: "none",
   backgroundColor: "transparent",
   color: "#2563eb",
-  padding: "0",
-  marginBottom: "22px",
+  padding: 0,
+  marginBottom: "20px",
   cursor: "pointer",
   fontSize: "14px",
-  fontWeight: "600",
+  fontWeight: "700",
 };
 
 const headerRowStyle: CSSProperties = {
@@ -765,9 +1259,8 @@ const headerRowStyle: CSSProperties = {
 
 const pageTitleStyle: CSSProperties = {
   margin: 0,
-  fontSize: "30px",
-  lineHeight: "38px",
   color: "#101828",
+  fontSize: "30px",
 };
 
 const pageDescriptionStyle: CSSProperties = {
@@ -777,64 +1270,62 @@ const pageDescriptionStyle: CSSProperties = {
 };
 
 const salesCountStyle: CSSProperties = {
-  minWidth: "135px",
+  minWidth: "130px",
+  padding: "14px 18px",
   backgroundColor: "#ffffff",
   border: "1px solid #eaecf0",
   borderRadius: "14px",
-  padding: "14px 18px",
-  boxShadow:
-    "0 4px 14px rgba(16,24,40,0.04)",
+  boxShadow: "0 4px 14px rgba(16,24,40,0.04)",
 };
 
 const countLabelStyle: CSSProperties = {
   display: "block",
+  marginBottom: "5px",
   color: "#667085",
   fontSize: "12px",
-  marginBottom: "5px",
 };
 
 const countNumberStyle: CSSProperties = {
-  fontSize: "24px",
   color: "#101828",
+  fontSize: "24px",
 };
 
-const contentGridStyle: CSSProperties = {
+const saleWorkspaceStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns:
-    "minmax(320px, 410px) minmax(0, 1fr)",
+    "minmax(340px, 420px) minmax(0, 1fr)",
   gap: "24px",
   alignItems: "start",
+  marginBottom: "28px",
 };
 
-const formCardStyle: CSSProperties = {
+const leftPanelStyle: CSSProperties = {
   backgroundColor: "#ffffff",
   padding: "24px",
   borderRadius: "16px",
   border: "1px solid #eaecf0",
-  boxShadow:
-    "0 8px 24px rgba(16,24,40,0.06)",
+  boxShadow: "0 8px 24px rgba(16,24,40,0.06)",
 };
 
-const salesCardStyle: CSSProperties = {
+const cartPanelStyle: CSSProperties = {
   backgroundColor: "#ffffff",
   borderRadius: "16px",
   border: "1px solid #eaecf0",
-  boxShadow:
-    "0 8px 24px rgba(16,24,40,0.06)",
+  boxShadow: "0 8px 24px rgba(16,24,40,0.06)",
   overflow: "hidden",
 };
 
-const cardHeadingRowStyle: CSSProperties = {
+const sectionHeaderStyle: CSSProperties = {
   marginBottom: "22px",
 };
 
-const cardTitleStyle: CSSProperties = {
+const sectionTitleStyle: CSSProperties = {
   margin: 0,
   color: "#101828",
   fontSize: "19px",
 };
 
-const cardSubtitleStyle: CSSProperties = {
+const sectionDescriptionStyle: CSSProperties = {
   margin: "6px 0 0",
   color: "#667085",
   fontSize: "13px",
@@ -845,7 +1336,7 @@ const labelStyle: CSSProperties = {
   marginBottom: "7px",
   color: "#344054",
   fontSize: "13px",
-  fontWeight: "600",
+  fontWeight: "700",
 };
 
 const inputStyle: CSSProperties = {
@@ -862,15 +1353,91 @@ const inputStyle: CSSProperties = {
   outline: "none",
 };
 
-const priceDetailsStyle: CSSProperties = {
+const productPickerStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 110px",
+  gap: "12px",
+};
+
+const productFieldStyle: CSSProperties = {
+  minWidth: 0,
+};
+
+const quantityFieldStyle: CSSProperties = {
+  minWidth: 0,
+};
+
+const selectedProductInfoStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "14px",
+  padding: "13px",
+  marginBottom: "14px",
+  backgroundColor: "#f8fafc",
+  border: "1px solid #eaecf0",
+  borderRadius: "10px",
+};
+
+const smallMutedTextStyle: CSSProperties = {
+  display: "block",
+  color: "#667085",
+  fontSize: "11px",
+  marginBottom: "4px",
+};
+
+const selectedProductNameStyle: CSSProperties = {
+  color: "#344054",
+  fontSize: "14px",
+};
+
+const selectedProductPriceStyle: CSSProperties = {
+  color: "#2563eb",
+  fontSize: "15px",
+};
+
+const addItemButtonStyle: CSSProperties = {
+  width: "100%",
+  minHeight: "42px",
+  border: "1px solid #bfdbfe",
+  borderRadius: "9px",
+  backgroundColor: "#eff6ff",
+  color: "#1d4ed8",
+  cursor: "pointer",
+  fontSize: "14px",
+  fontWeight: "700",
+};
+
+const dividerStyle: CSSProperties = {
+  height: "1px",
+  backgroundColor: "#eaecf0",
+  margin: "24px 0",
+};
+
+const statusPreviewStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  padding: "13px",
+  marginBottom: "16px",
+  border: "1px solid #eaecf0",
+  borderRadius: "10px",
+  backgroundColor: "#f8fafc",
+  color: "#475467",
+  fontSize: "13px",
+  fontWeight: "700",
+};
+
+const totalsBoxStyle: CSSProperties = {
   padding: "16px",
+  marginTop: "4px",
   marginBottom: "18px",
   backgroundColor: "#f8fafc",
   border: "1px solid #eaecf0",
   borderRadius: "11px",
 };
 
-const priceRowStyle: CSSProperties = {
+const totalLineStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   padding: "7px 0",
@@ -878,7 +1445,23 @@ const priceRowStyle: CSSProperties = {
   fontSize: "14px",
 };
 
-const grandTotalRowStyle: CSSProperties = {
+const discountTextStyle: CSSProperties = {
+  color: "#b91c1c",
+};
+
+const taxTextStyle: CSSProperties = {
+  color: "#15803d",
+};
+
+const paidTextStyle: CSSProperties = {
+  color: "#15803d",
+};
+
+const remainingTextStyle: CSSProperties = {
+  color: "#b45309",
+};
+
+const grandTotalLineStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   marginTop: "8px",
@@ -889,9 +1472,9 @@ const grandTotalRowStyle: CSSProperties = {
   fontWeight: "700",
 };
 
-const createButtonStyle: CSSProperties = {
+const createSaleButtonStyle: CSSProperties = {
   width: "100%",
-  minHeight: "44px",
+  minHeight: "45px",
   border: "none",
   borderRadius: "9px",
   backgroundColor: "#2563eb",
@@ -900,7 +1483,149 @@ const createButtonStyle: CSSProperties = {
   fontWeight: "700",
 };
 
-const tableCardHeaderStyle: CSSProperties = {
+const cartHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "16px",
+  padding: "22px 24px",
+  borderBottom: "1px solid #eaecf0",
+};
+
+const cartCountBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  backgroundColor: "#eff6ff",
+  color: "#1d4ed8",
+  fontSize: "12px",
+  fontWeight: "700",
+};
+
+const emptyCartStyle: CSSProperties = {
+  padding: "75px 24px",
+  textAlign: "center",
+};
+
+const emptyCartIconStyle: CSSProperties = {
+  fontSize: "36px",
+  marginBottom: "12px",
+};
+
+const emptyCartTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#344054",
+  fontSize: "17px",
+};
+
+const emptyCartTextStyle: CSSProperties = {
+  maxWidth: "360px",
+  margin: "8px auto 0",
+  color: "#667085",
+  fontSize: "13px",
+  lineHeight: 1.6,
+};
+
+const cartTableWrapperStyle: CSSProperties = {
+  width: "100%",
+  overflowX: "auto",
+};
+
+const cartTableStyle: CSSProperties = {
+  width: "100%",
+  minWidth: "800px",
+  borderCollapse: "separate",
+  borderSpacing: 0,
+};
+
+const cartHeaderCellStyle: CSSProperties = {
+  padding: "13px 15px",
+  backgroundColor: "#f8fafc",
+  borderBottom: "1px solid #eaecf0",
+  color: "#475467",
+  textAlign: "left",
+  fontSize: "12px",
+  fontWeight: "700",
+  textTransform: "uppercase",
+};
+
+const cartNumberHeaderStyle: CSSProperties = {
+  ...cartHeaderCellStyle,
+  textAlign: "right",
+};
+
+const cartActionHeaderStyle: CSSProperties = {
+  ...cartHeaderCellStyle,
+  textAlign: "center",
+};
+
+const cartCellStyle: CSSProperties = {
+  padding: "15px",
+  borderBottom: "1px solid #f2f4f7",
+  color: "#475467",
+  fontSize: "14px",
+  verticalAlign: "middle",
+};
+
+const cartNumberCellStyle: CSSProperties = {
+  ...cartCellStyle,
+  textAlign: "right",
+  whiteSpace: "nowrap",
+};
+
+const cartTotalCellStyle: CSSProperties = {
+  ...cartNumberCellStyle,
+  color: "#101828",
+  fontWeight: "700",
+};
+
+const cartActionCellStyle: CSSProperties = {
+  ...cartCellStyle,
+  textAlign: "center",
+};
+
+const productNameStyle: CSSProperties = {
+  display: "block",
+  marginBottom: "4px",
+  color: "#344054",
+};
+
+const stockTextStyle: CSSProperties = {
+  display: "block",
+  color: "#667085",
+  fontSize: "11px",
+};
+
+const cartQuantityInputStyle: CSSProperties = {
+  width: "75px",
+  height: "36px",
+  padding: "0 8px",
+  border: "1px solid #d0d5dd",
+  borderRadius: "7px",
+  textAlign: "center",
+  fontSize: "14px",
+};
+
+const removeButtonStyle: CSSProperties = {
+  border: "1px solid #fecaca",
+  borderRadius: "7px",
+  padding: "7px 10px",
+  backgroundColor: "#fff1f2",
+  color: "#be123c",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: "700",
+};
+
+const salesCardStyle: CSSProperties = {
+  backgroundColor: "#ffffff",
+  borderRadius: "16px",
+  border: "1px solid #eaecf0",
+  boxShadow: "0 8px 24px rgba(16,24,40,0.06)",
+  overflow: "hidden",
+};
+
+const salesCardHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
@@ -911,28 +1636,27 @@ const tableCardHeaderStyle: CSSProperties = {
 
 const recordBadgeStyle: CSSProperties = {
   display: "inline-flex",
-  alignItems: "center",
   padding: "6px 10px",
+  borderRadius: "999px",
   backgroundColor: "#eff6ff",
   color: "#1d4ed8",
-  borderRadius: "999px",
   fontSize: "12px",
   fontWeight: "700",
 };
 
-const tableWrapperStyle: CSSProperties = {
+const salesTableWrapperStyle: CSSProperties = {
   width: "100%",
   overflowX: "auto",
 };
 
-const tableStyle: CSSProperties = {
+const salesTableStyle: CSSProperties = {
   width: "100%",
-  minWidth: "900px",
+  minWidth: "1200px",
   borderCollapse: "separate",
   borderSpacing: 0,
 };
 
-const tableHeaderStyle: CSSProperties = {
+const salesHeaderStyle: CSSProperties = {
   padding: "13px 16px",
   backgroundColor: "#f8fafc",
   borderBottom: "1px solid #eaecf0",
@@ -941,26 +1665,25 @@ const tableHeaderStyle: CSSProperties = {
   fontSize: "12px",
   fontWeight: "700",
   textTransform: "uppercase",
-  letterSpacing: "0.03em",
 };
 
-const firstHeaderStyle: CSSProperties = {
-  ...tableHeaderStyle,
+const firstSalesHeaderStyle: CSSProperties = {
+  ...salesHeaderStyle,
   paddingLeft: "24px",
 };
 
-const amountHeaderStyle: CSSProperties = {
-  ...tableHeaderStyle,
+const salesAmountHeaderStyle: CSSProperties = {
+  ...salesHeaderStyle,
   textAlign: "right",
 };
 
-const actionHeaderStyle: CSSProperties = {
-  ...tableHeaderStyle,
+const salesActionHeaderStyle: CSSProperties = {
+  ...salesHeaderStyle,
   textAlign: "center",
   paddingRight: "24px",
 };
 
-const tableCellStyle: CSSProperties = {
+const salesCellStyle: CSSProperties = {
   padding: "16px",
   borderBottom: "1px solid #f2f4f7",
   color: "#475467",
@@ -968,23 +1691,23 @@ const tableCellStyle: CSSProperties = {
   verticalAlign: "middle",
 };
 
-const firstCellStyle: CSSProperties = {
-  ...tableCellStyle,
+const firstSalesCellStyle: CSSProperties = {
+  ...salesCellStyle,
   paddingLeft: "24px",
   color: "#344054",
   whiteSpace: "nowrap",
 };
 
-const amountCellStyle: CSSProperties = {
-  ...tableCellStyle,
+const salesAmountCellStyle: CSSProperties = {
+  ...salesCellStyle,
   textAlign: "right",
   color: "#101828",
   fontWeight: "700",
   whiteSpace: "nowrap",
 };
 
-const actionCellStyle: CSSProperties = {
-  ...tableCellStyle,
+const salesActionCellStyle: CSSProperties = {
+  ...salesCellStyle,
   textAlign: "center",
   paddingRight: "24px",
 };
@@ -1022,7 +1745,7 @@ const invoiceBadgeStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const invoiceButtonStyle: CSSProperties = {
+const viewInvoiceButtonStyle: CSSProperties = {
   border: "1px solid #bfdbfe",
   borderRadius: "8px",
   padding: "8px 12px",
@@ -1064,26 +1787,9 @@ const partialStatusStyle: CSSProperties = {
   fontWeight: "700",
 };
 
-const emptyStateStyle: CSSProperties = {
-  padding: "65px 24px",
-  textAlign: "center",
-};
-
-const emptyIconStyle: CSSProperties = {
-  fontSize: "34px",
-  marginBottom: "12px",
-};
-
-const emptyTitleStyle: CSSProperties = {
-  margin: 0,
-  color: "#344054",
-  fontSize: "16px",
-};
-
-const emptyTextStyle: CSSProperties = {
-  maxWidth: "360px",
-  margin: "8px auto 0",
+const emptySalesStyle: CSSProperties = {
+  padding: "55px 24px",
   color: "#667085",
-  fontSize: "13px",
-  lineHeight: 1.6,
+  textAlign: "center",
+  fontSize: "14px",
 };
