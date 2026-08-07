@@ -472,6 +472,16 @@ export default function DashboardPage() {
       path: "/purchase",
     },
     {
+  label: "Supplier Payments",
+  icon: "💸",
+  path: "/supplier_payment",
+},
+{
+  label: "Supplier Ledger",
+  icon: "📒",
+  path: "/supplier_ledger",
+},
+    {
       label: "Customer Ledger",
       icon: "📒",
       path: "/customer_Ledger",
