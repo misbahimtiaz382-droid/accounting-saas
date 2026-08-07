@@ -467,9 +467,9 @@ export default function DashboardPage() {
   path: "/payment",
 },
     {
-      label: "Purchases",
+      label: "Purchase",
       icon: "🛒",
-      path: "/purchases",
+      path: "/purchase",
     },
     {
       label: "Customer Ledger",
