@@ -232,18 +232,20 @@ export default function SalesPage() {
     );
   }
 
-  function createInvoiceNumber() {
-    const timePart = Date.now()
-      .toString()
-      .slice(-8);
+ async function createInvoiceNumber() {
+  const { data, error } = await supabase.rpc(
+    "generate_invoice_number"
+  );
 
-    const randomPart = Math.random()
-      .toString(36)
-      .substring(2, 5)
-      .toUpperCase();
-
-    return "INV-" + timePart + randomPart;
+  if (error || !data) {
+    throw new Error(
+      error?.message ||
+        "Invoice number generate nahi hua."
+    );
   }
+
+  return data as string;
+}
   function addItemToCart() {
     if (!selectedProduct) {
       alert("Product select karo.");
@@ -431,7 +433,8 @@ export default function SalesPage() {
     setSaving(true);
 
     const invoiceNumber =
-      createInvoiceNumber();
+      await createInvoiceNumber();
+      alert("Invoice number: " + invoiceNumber);
 
     const {
       data: sale,
