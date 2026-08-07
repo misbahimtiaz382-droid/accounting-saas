@@ -1193,16 +1193,13 @@ return (
 
                       <td style={salesActionCellStyle}>
                         <button
-                          type="button"
-                          onClick={() =>
-                            router.push(
-                              "/invoices/" + sale.id
-                            )
-                          }
-                          style={viewInvoiceButtonStyle}
-                        >
-                          View Invoice
-                        </button>
+  type="button"
+  onClick={() =>
+    router.push(`/invoice_view?id=${sale.id}`)
+  }
+>
+  View Invoice
+</button>
                       </td>
                     </tr>
                   ))}
