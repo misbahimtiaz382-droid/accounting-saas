@@ -496,6 +496,11 @@ export default function DashboardPage() {
   icon: "🧾",
   path: "/journal_entries",
 },
+{
+  label: "General Ledger",
+  icon: "📚",
+  path: "/general_ledger",
+},
     {
       label: "Settings",
       icon: "⚙️",
