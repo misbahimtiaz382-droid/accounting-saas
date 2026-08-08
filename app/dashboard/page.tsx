@@ -487,6 +487,11 @@ export default function DashboardPage() {
       path: "/customer_Ledger",
     },
     {
+  label: "Chart of Accounts",
+  icon: "📊",
+  path: "/accounts",
+},
+    {
       label: "Settings",
       icon: "⚙️",
       path: "/settings",
