@@ -491,6 +491,11 @@ export default function DashboardPage() {
   icon: "📊",
   path: "/accounts",
 },
+{
+  label: "Journal Entries",
+  icon: "🧾",
+  path: "/journal_entries",
+},
     {
       label: "Settings",
       icon: "⚙️",
